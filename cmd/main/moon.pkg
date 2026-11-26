@@ -1,6 +1,7 @@
 import {
   "2227057182/moonbit-lowprec" @lib,
   "moonbitlang/core/env" @env,
+  "moonbitlang/core/math" @math,
 }
 
 pkgtype(kind: "executable")

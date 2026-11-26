@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-11-26
+
+Quantization error reporting.
+
+- `quantization_report(values, params, mode)` returns `QuantReport` with
+  `max_abs_error`, `mean_abs_error`, `snr_db` and `count`.
+- `snr_db` is `10 * log10(signal energy / error energy)`; exact reproduction
+  reports positive infinity instead of a sentinel.
+- `cmd/main report` runs a 256-sample sine through all four rounding modes
+  so the cost of truncation is visible as a number (about 5.5 dB here).
+- Six new tests, thirty-seven total, still passing on the three backends.
+
 ## 0.5.0 — 2026-11-26
 
 A command-line inspector for the types above.

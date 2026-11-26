@@ -1,8 +1,9 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.5.0 ships **IEEE 754
-binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with a
-command-line inspector, everything checked against independent references.
+Low-precision numeric types for MoonBit. Version 0.6.0 ships **IEEE 754
+binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with
+signal-to-noise reporting and a command-line inspector, everything checked
+against independent references.
 
 ## Why this exists
 
@@ -67,10 +68,14 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
 - `ggml_q4_0_dequantize` reads a real GGML Q4_0 block: 32 weights from 16
   packed bytes and a binary16 scale — the point where `F16` meets a
   container format
+- `quantization_report` measures a configuration on a given signal:
+  `max_abs_error`, `mean_abs_error` and `snr_db` =
+  `10 * log10(signal energy / error energy)`, reported as positive infinity
+  when nothing is lost
 
 ## Correctness evidence
 
-`moon test` runs thirty-one tests on `wasm`, `wasm-gc` and `js`, all
+`moon test` runs thirty-seven tests on `wasm`, `wasm-gc` and `js`, all
 passing.
 
 Exhaustive checks, not samples:
@@ -88,10 +93,14 @@ Exhaustive checks, not samples:
    16-bit field.
 8. **Requantization**: all 256 int8 codes against a `Double` computation,
    with the exact-match count asserted.
+9. **Rounding bound**: 990 signal points across -0.99..0.99 must stay
+   within half a step of the nearest representable value, and truncation
+   must show a strictly larger maximum error than nearest-even on the same
+   points.
 
 Targeted tests cover hand-checked rounding directions, division,
-per-channel parameters, integer dot products, clamp edges, and all sixteen
-Q4_0 codes.
+per-channel parameters, integer dot products, clamp edges, SNR agreement
+with an independent `Double` computation, and all sixteen Q4_0 codes.
 
 ## Platform notes
 
@@ -141,9 +150,26 @@ quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
 sixteen-bit scale and sixteen packed bytes; `selftest` runs seven built-in
 checks.
 
+`report` runs the same sine signal through the four rounding modes, which
+is the shortest way to see what rounding costs:
+
+```
+$ moon run cmd/main --target wasm -- report
+signal: 256 sine samples, amplitude 0.98 (inside int8 at this scale)
+int8, scale 0.0078125; the clamp is therefore not the limiting error
+nearest-even     snr=49.64783777764896 dB  max=0.00387994390673585  mean=0.0019332765206122346
+toward-zero      snr=44.28974511105994 dB  max=0.007689669576354974  mean=0.003555764862619121
+toward-negative  snr=43.721530746038056 dB  max=0.007782736282212155  mean=0.003875732421875004
+toward-positive  snr=43.67102652611996 dB  max=0.00781249999999988  mean=0.003906249999999996
+```
+
+Nearest-even holds the maximum error at half a step and gains about five
+and a half decibels over the truncating modes, which is the expected
+result: truncation loses up to a full step instead of half.
+
 ## Roadmap
 
-- 0.6: reference vectors exported from the exhaustive checks, so downstream
+- 0.7: reference vectors exported from the exhaustive checks, so downstream
   projects can verify their own low-precision layer against this one
 
 ## License

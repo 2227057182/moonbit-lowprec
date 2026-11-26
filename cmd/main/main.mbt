@@ -7,6 +7,7 @@ fn usage() -> Unit {
   println("  quant <value> <scale> <zp>   quantize then dequantize with int8")
   println("  requant <q> <in_scale> <in_zp> <out_scale> <out_zp>")
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
+  println("  report                  compare four rounding modes on a sine signal")
   println("  selftest                run the built-in checks")
 }
 
@@ -194,6 +195,37 @@ fn show_q4_0(scale_bits : Int, bytes : Array[Int]) -> Unit {
   println(text)
 }
 
+fn demo_report() -> Unit {
+  // A sine sweep with amplitude 1: the usual shape of a normalized weight
+  // or activation, quantized at int8 with a step of 1/128.
+  let n = 256
+  let values = Array::make(n, 0.0)
+  for i = 0; i < n; i = i + 1 {
+    values[i] = 0.98 * @math.sin(
+      2.0 * 3.141592653589793 * Double::from_int(i) / Double::from_int(n),
+    )
+  }
+  let p = @lib.QuantParams::int8(0.0078125, 0)
+  println("signal: 256 sine samples, amplitude 0.98 (inside int8 at this scale)")
+  println("int8, scale 0.0078125; the clamp is therefore not the limiting error")
+  let modes : Array[@lib.Rounding] = [
+    @lib.NearestEven,
+    @lib.TowardZero,
+    @lib.TowardNegative,
+    @lib.TowardPositive,
+  ]
+  let names = ["nearest-even    ", "toward-zero     ", "toward-negative ", "toward-positive "]
+  for i = 0; i < modes.length(); i = i + 1 {
+    let r = @lib.quantization_report(values, p, modes[i])
+    println(
+      names[i] +
+      " snr=" + r.snr_db.to_string() +
+      " dB  max=" + r.max_abs_error.to_string() +
+      "  mean=" + r.mean_abs_error.to_string(),
+    )
+  }
+}
+
 fn selftest() -> Unit {
   let mut passed = 0
   let mut failed = 0
@@ -246,6 +278,8 @@ fn main {
       bytes[i] = parse_bits(args[3 + i])
     }
     show_q4_0(scale, bytes)
+  } else if cmd == "report" {
+    demo_report()
   } else if cmd == "selftest" {
     selftest()
   } else {

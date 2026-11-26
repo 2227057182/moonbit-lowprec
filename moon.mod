@@ -1,6 +1,6 @@
 name = "2227057182/moonbit-lowprec"
 
-version = "0.3.0"
+version = "0.4.0"
 
 readme = "README.md"
 
@@ -12,4 +12,4 @@ keywords = ["float16", "bfloat16", "fixed-point", "quantization", "numeric"]
 
 preferred_target = "wasm"
 
-description = "Low-precision numeric types for MoonBit: binary16, bfloat16 and fixed-point arithmetic with exhaustive reference tests."
+description = "Low-precision numeric types for MoonBit: binary16, bfloat16, fixed-point and affine quantization with exhaustive reference tests."

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-11-26
+
+Affine quantization on top of the fixed-point core.
+
+- `QuantParams` with `int8`/`uint8` ranges, `quantize`, `dequantize`.
+- `RequantScale::from_scales` normalizes `scale_in / scale_out` into a
+  31-bit multiplier plus a shift.
+- `requantize` runs entirely on integers: 64-bit product, one rounding, one
+  clamp.
+- Per-channel parameters, 64-bit integer dot product.
+- `ggml_q4_0_dequantize` reads a real GGML Q4_0 block, wiring `F16` into a
+  container format.
+- `Fixed` multiplication restricted to fields up to 16 bits, and the
+  requantization product widened to 64 bits, because `Int` is a 32-bit word
+  in this dialect. Both limits are documented rather than hidden.
+- Thirty-one tests passing on wasm, wasm-gc and js.
 ## 0.3.0 — 2026-11-26
 
 Fixed-point arithmetic.

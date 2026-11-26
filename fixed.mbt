@@ -75,13 +75,25 @@ pub fn Fixed::width(self : Fixed) -> Int {
 }
 
 /// Smallest raw value the field can hold.
+///
+/// `Int` is a signed 32-bit word here, so a 32-bit field has no headroom
+/// above it; the literals are written as expressions because the decimal
+/// `-2147483648` is not a valid literal in this dialect.
 pub fn Fixed::min_raw(self : Fixed) -> Int {
-  -(1 << (self.width - 1))
+  if self.width >= 32 {
+    -2147483647 - 1
+  } else {
+    -(1 << (self.width - 1))
+  }
 }
 
 /// Largest raw value the field can hold.
 pub fn Fixed::max_raw(self : Fixed) -> Int {
-  (1 << (self.width - 1)) - 1
+  if self.width >= 32 {
+    2147483647
+  } else {
+    (1 << (self.width - 1)) - 1
+  }
 }
 
 /// True when the raw value fits the declared field.
@@ -99,8 +111,16 @@ pub fn Fixed::to_double(self : Fixed) -> Double {
 
 /// Clamp, wrap or pass through an integer according to the overflow mode.
 fn settle(v : Int, width : Int, mode : Overflow) -> Int {
-  let lo = -(1 << (width - 1))
-  let hi = (1 << (width - 1)) - 1
+  let lo = if width >= 32 {
+    -2147483647 - 1
+  } else {
+    -(1 << (width - 1))
+  }
+  let hi = if width >= 32 {
+    2147483647
+  } else {
+    (1 << (width - 1)) - 1
+  }
   match mode {
     Saturate => {
       if v < lo {
@@ -112,12 +132,17 @@ fn settle(v : Int, width : Int, mode : Overflow) -> Int {
       }
     }
     Wrap => {
-      let mask = (1 << width) - 1
-      let low = v & mask
-      if (low >> (width - 1)) == 1 {
-        low - (1 << width)
+      if width >= 32 {
+        // The storage word already is the field, so wrapping is a no-op.
+        v
       } else {
-        low
+        let mask = (1 << width) - 1
+        let low = v & mask
+        if (low >> (width - 1)) == 1 {
+          low - (1 << width)
+        } else {
+          low
+        }
       }
     }
   }
@@ -135,7 +160,9 @@ fn round_signed(n : Int, shift : Int, mode : Rounding) -> Int {
   if shift < 0 {
     return n << -shift
   }
-  if shift > 62 {
+  // `Int` is 32 bits here, so a shift of 31 or more cannot be represented
+  // by `1 << shift`; such a drop always leaves zero.
+  if shift > 30 {
     return 0
   }
   let negative = n < 0
@@ -225,6 +252,9 @@ pub fn Fixed::mul_raw(self : Fixed, other : Fixed) -> Int {
 pub fn Fixed::mul(self : Fixed, other : Fixed, frac_out : Int, rounding : Rounding, overflow : Overflow) -> Fixed {
   if self.width != other.width {
     abort("fixed-point mul requires equal widths")
+  }
+  if self.width > 16 {
+    abort("fixed-point mul supports fields up to 16 bits; use mul_raw into a wider accumulator")
   }
   let exact = self.mul_raw(other)
   let shift = self.frac + other.frac - frac_out

@@ -1,8 +1,8 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.3.0 ships **IEEE 754
-binary16**, **bfloat16** and **fixed-point** arithmetic with explicit
-rounding and overflow semantics; quantized operators follow in 0.4.
+Low-precision numeric types for MoonBit. Version 0.4.0 ships **IEEE 754
+binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with
+everything checked against independent references.
 
 ## Why this exists
 
@@ -44,66 +44,83 @@ interchangeable with binary32.
 
 ### `Fixed` — signed fixed-point
 
-A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`. The
-storage is wider than any supported field, so the exact product of two
-values always fits and no intermediate rounding is forced.
+A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
 
 - five rounding modes: `TowardZero`, `TowardNegative`, `TowardPositive`,
   `NearestEven`, `NearestAway`
 - two overflow modes: `Saturate`, `Wrap`
-- `add`, `sub`, `neg`, `abs`, `mul`, `div`, `rescale`
-- `mul_raw` returns the exact product for multi-term accumulation
-- `from_int`, `from_raw`, `to_double`, `is_valid`
+- `add`, `sub`, `neg`, `abs`, `mul`, `div`, `rescale`, `mul_raw`
+- rounding is defined on the magnitude with the sign restored, so negative
+  inputs follow the named direction instead of inheriting truncation toward
+  zero
 
-Rounding is defined on the magnitude with the sign restored, so negative
-inputs follow the named direction instead of inheriting C's
-truncation-toward-zero by accident.
+### Quantization
+
+- `QuantParams` — affine `x = (q - zero_point) * scale`, with `int8` and
+  `uint8` constructors
+- `quantize`, `dequantize`, `quantize_channel`, `dequantize_channel`
+- `RequantScale::from_scales` derives `scale_in / scale_out` as an integer
+  multiplier normalized into `[2^30, 2^31)` plus a right shift
+- `requantize` moves between domains with no float in the middle: the
+  product is formed in 64 bits, rounded once, clamped once
+- `dot_i8` accumulates in 64 bits
+- `ggml_q4_0_dequantize` reads a real GGML Q4_0 block: 32 weights from 16
+  packed bytes and a binary16 scale — the point where `F16` meets a
+  container format
 
 ## Correctness evidence
 
-`moon test` runs twenty-three tests on `wasm`, `wasm-gc` and `js`, all
-passing in about half a second per backend.
+`moon test` runs thirty-one tests on `wasm`, `wasm-gc` and `js`, all
+passing.
 
 Exhaustive checks, not samples:
 
 1. **binary16 round-trip** over all 65536 patterns — 63490 non-NaN checked.
 2. **bfloat16 round-trip** over all 65536 patterns — 65282 non-NaN checked.
 3. **binary16 and bfloat16 monotonicity** over the positive finite range.
-4. **Classification** for both float types against the raw fields on all
-   65536 patterns.
+4. **Classification** for both float types on all 65536 patterns.
 5. **Fixed-point multiplication**: all 65536 operand pairs from the signed
-   8-bit range × five rounding modes = 327680 results, each compared with
-   an independent `Double` reference.
-6. **Widening multiply**: the same 65536 pairs at 8 fractional bits
-   multiplied to 16 fractional bits must produce the raw product exactly —
-   the double-width multiply-accumulate case.
-7. **Saturation and wrap**: every one of the 65536 raw values in a 16-bit
-   field, adding one, under both overflow modes.
+   8-bit range × five rounding modes = 327680 results against an
+   independent `Double` reference.
+6. **Widening multiply**: the same 65536 pairs must produce the raw product
+   exactly.
+7. **Saturation and wrap** over every one of the 65536 raw values in a
+   16-bit field.
+8. **Requantization**: all 256 int8 codes against a `Double` computation,
+   with the exact-match count asserted.
 
-Targeted tests cover hand-checked rounding directions (positive, negative,
-exact halves), division, requantization, and negation at the field edge.
+Targeted tests cover hand-checked rounding directions, division,
+per-channel parameters, integer dot products, clamp edges, and all sixteen
+Q4_0 codes.
+
+## Platform notes
+
+`Int` in this dialect is a signed 32-bit word. That constrains two things
+and they are stated rather than hidden:
+
+- fixed-point multiplication supports fields up to 16 bits, where the
+  product stays below 2^30; wider accumulation goes through `mul_raw` or
+  `dot_i8`
+- the requantization product reaches about 2^38, so `requantize` forms it
+  in `Int64` before rounding
 
 ## Usage
 
 ```moonbit
 let a = F16::from_float(1.5)
-let b = BF16::from_bits(0x3F80) // 1.0
 assert_eq(a.to_float(), 1.5)
-assert_eq(b.to_float(), 1.0)
 
-// 1.5 * 1.5 = 2.25, settled on the integer grid, nearest even.
-let x = Fixed::from_raw(3, 1, 16)
+let x = Fixed::from_raw(3, 1, 16) // 1.5
 assert_eq(x.mul(x, 0, NearestEven, Saturate).raw(), 2)
+
+let p = QuantParams::int8(0.05, 0)
+assert_eq(dequantize(quantize(1.25, p, NearestEven), p), 1.25)
 ```
 
 ## Roadmap
 
-- 0.4: quantization operators — affine scale/zero-point, per-tensor and
-  per-channel, quantize/dequantize/requantize, integer matrix multiply,
-  checked against a GGUF block
-
-Each stage keeps the same rule: reference vectors computed independently,
-checked bit for bit in the repository, no floating tolerance in tests.
+- 0.5: command-line inspector for float bit patterns and quantization
+  parameters, plus a comparison report against reference vectors
 
 ## License
 

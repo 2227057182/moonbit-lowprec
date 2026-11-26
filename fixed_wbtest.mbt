@@ -106,7 +106,7 @@ test "exhaustive 8-bit multiplication across five rounding modes" {
 test "exhaustive widening multiply is exact" {
   for a = -128; a <= 127; a = a + 1 {
     for b = -128; b <= 127; b = b + 1 {
-      let p = Fixed::from_raw(a, 8, 32).mul(Fixed::from_raw(b, 8, 32), 16, TowardZero, Saturate)
+      let p = Fixed::from_raw(a, 8, 16).mul(Fixed::from_raw(b, 8, 16), 16, TowardZero, Saturate)
       if p.raw() != a * b {
         assert_eq(p.raw(), a * b)
       }

@@ -1,9 +1,9 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.6.0 ships **IEEE 754
+Low-precision numeric types for MoonBit. Version 0.7.0 ships **IEEE 754
 binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with
-signal-to-noise reporting and a command-line inspector, everything checked
-against independent references.
+signal-to-noise reporting, published reference vectors and a command-line
+inspector, everything checked against independent references.
 
 ## Why this exists
 
@@ -82,7 +82,7 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
 
 ## Correctness evidence
 
-`moon test` runs thirty-seven tests on `wasm`, `wasm-gc` and `js`, all
+`moon test` runs thirty-nine tests on `wasm`, `wasm-gc` and `js`, all
 passing.
 
 Exhaustive checks, not samples:
@@ -154,8 +154,8 @@ multiplier=1342177280 shift=28 code=253 value=1.25
 
 `requant` prints the integer multiplier and shift it derived, so the
 quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
-sixteen-bit scale and sixteen packed bytes; `selftest` runs seven built-in
-checks.
+sixteen-bit scale and sixteen packed bytes; `verify` re-checks the published
+vectors; `selftest` runs seven built-in checks.
 
 `report` runs the same sine signal through the four rounding modes, which
 is the shortest way to see what rounding costs:
@@ -174,10 +174,30 @@ Nearest-even holds the maximum error at half a step and gains about five
 and a half decibels over the truncating modes, which is the expected
 result: truncation loses up to a full step instead of half.
 
+## Published vectors
+
+`vectors.mbt` exports the check table itself, so another implementation can
+compare against this one without importing it:
+
+```moonbit
+f16_vectors  : Array[(Int, Double)] // 24 binary16 patterns
+bf16_vectors : Array[(Int, Double)] // 14 bfloat16 patterns
+quant_vectors: Array[(Int, Double)] // 11 int8 codes at scale 0.0078125
+fixed_vectors: Array[(Int, Double)] // 11 raw values at frac 3
+```
+
+Each row is the pattern and the exact binary64 value it must widen to. The
+table pins both ends of every type — the smallest binary16 subnormal, the
+largest binary16 finite value, the largest bfloat16 finite value, both int8
+codes, and the edges of a 16-bit fixed field. `verify_vectors()` returns
+`(checked, failed)`, `moon run cmd/main -- verify` prints
+`vectors 60/60 reproduce`, and a test fails if any row stops reproducing.
+
 ## Roadmap
 
-- 0.7: reference vectors exported from the exhaustive checks, so downstream
-  projects can verify their own low-precision layer against this one
+- 0.8: numeric comparison against `matrixlt/moon-onnx`'s per-tensor int8
+  operators, so the two implementations can be cross-checked on the one
+  overlap they share
 
 ## License
 

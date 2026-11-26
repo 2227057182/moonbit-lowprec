@@ -8,6 +8,7 @@ fn usage() -> Unit {
   println("  requant <q> <in_scale> <in_zp> <out_scale> <out_zp>")
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
   println("  report                  compare four rounding modes on a sine signal")
+  println("  verify                  check the published reference vectors")
   println("  selftest                run the built-in checks")
 }
 
@@ -226,6 +227,14 @@ fn demo_report() -> Unit {
   }
 }
 
+fn run_verify() -> Unit {
+  let (checked, failed) = @lib.verify_vectors()
+  println(
+    "vectors " + (checked - failed).to_string() + "/" + checked.to_string() +
+    " reproduce" + (if failed == 0 { "" } else { ", " + failed.to_string() + " differ" }),
+  )
+}
+
 fn selftest() -> Unit {
   let mut passed = 0
   let mut failed = 0
@@ -280,6 +289,8 @@ fn main {
     show_q4_0(scale, bytes)
   } else if cmd == "report" {
     demo_report()
+  } else if cmd == "verify" {
+    run_verify()
   } else if cmd == "selftest" {
     selftest()
   } else {

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 — 2026-11-26
+
+Published reference vectors.
+
+- `vectors.mbt` exports `f16_vectors`, `bf16_vectors`, `quant_vectors` and
+  `fixed_vectors`: pattern plus the exact binary64 value it must produce,
+  sixty rows in total.
+- `verify_vectors()` returns `(checked, failed)`; `cmd/main verify` prints
+  `vectors 60/60 reproduce`.
+- Two tests: the table must reproduce in full, and it must still contain the
+  extremes of each type.
+- An adjacent module was re-checked at source level:
+  `matrixlt/moon-onnx` does implement per-tensor int8/uint8 quantization, so
+  the gap is narrower than a description scan suggests. The gap claims in
+  `docs/coverage.md` and the README now say what is actually absent
+  (binary16/bfloat16 types, fixed-point, per-channel scale, integer
+  requantization, error reporting) instead of "no int8 anywhere".
+
 ## 0.6.0 — 2026-11-26
 
 Quantization error reporting.

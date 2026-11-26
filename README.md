@@ -8,8 +8,8 @@ against independent references.
 ## Why this exists
 
 MoonBit already has floating point, but it has no *low-precision* numeric
-layer. A scan of the 3975 modules published on mooncakes.io (2026-11-26)
-returns **zero** matches for `fixed point`, `int8`, `int16`, `f16`,
+layer. A scan of the 3975 module descriptions published on mooncakes.io
+(2026-11-26) returns **zero** matches for `fixed point`, `int16`, `f16`,
 `fp16` and `bfloat16`. The nearest neighbours cover different ground:
 
 | Module | What it covers | What it does not |
@@ -17,7 +17,14 @@ returns **zero** matches for `fixed point`, `int8`, `int16`, `f16`,
 | `Luna-Flow/floating` | arbitrary-precision binary/decimal and interval arithmetic | 16-bit formats, fixed-point, quantization |
 | `moonbit-community/softfloat` | IEEE-754 software float emulation | binary16/bfloat16 as types |
 | `soehi/gguf` | reads GGUF containers, dequantizes ggml blocks | the numeric types those blocks represent |
-| `matrixlt/onnx` | ONNX graph execution | an exposed low-precision type layer |
+| `matrixlt/moon-onnx` | ONNX graph execution; per-tensor int8/uint8 quantization operators | binary16/bfloat16, fixed-point, per-channel parameters, requantization, any exposed type |
+
+`matrixlt/moon-onnx` is the one place int8 already appears: its
+`ml_kernels/quant` package implements `QuantizeLinear`-style per-tensor
+quantization with round-half-to-even. That is an operator inside a graph
+runner, not a numeric type, and it has no float16, bfloat16, per-channel
+scale, requantization path or error reporting. Those are the parts this
+project supplies.
 
 The gap is not cosmetic. binary16 has a 5-bit exponent (range 6.1e-5 to
 65504) and an 11-bit significand; bfloat16 keeps binary32's 8-bit exponent

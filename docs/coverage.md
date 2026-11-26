@@ -11,7 +11,7 @@ produces false positives.
 | Query | Matches | Meaning |
 |---|---|---|
 | `fixed point` | 0 | no fixed-point arithmetic |
-| `int8` | 0 | no integer quantization type |
+| `int8` | 0 | no integer quantization type in any description |
 | `int16` | 0 | no 16-bit integer type |
 | `f16` / `fp16` / `half float` | 0 | no binary16 |
 | `bfloat16` | 0 | no bfloat16 |
@@ -36,10 +36,27 @@ word.
   into float. It consumes low-precision data; it does not expose the types.
   This is the strongest evidence that demand exists while the type layer
   does not.
-- **`matrixlt/onnx` 0.2.0** — pure-MoonBit ONNX inference engine. If it
-  implements quantization internally, that implementation is not an
-  exposed, testable type layer; this entry should be re-checked before the
-  quantization milestone.
+- **`matrixlt/moon-onnx` 0.2.0** — pure-MoonBit ONNX inference engine.
+  Re-checked at source level rather than from the description: the repository
+  is `matrixlt/moon-onnx`, and `packages/ml_kernels/quant/quant.mbt` implements
+  `quantize_u8_per_tensor`, `quantize_i8_per_tensor`, `dequantize_u8_per_tensor`,
+  `dequantize_i8_per_tensor` and `round_half_to_even`, following the
+  `QuantizeLinear` / `QLinearMatMul` specification.
+  `packages/onnx/ops/quant.mbt` wraps them as graph operators.
+
+  What that means for the gap claim, stated plainly: **per-tensor int8/uint8
+  affine quantization is not a gap by itself.** Those operators exist and are
+  written correctly (round half to even, clamped to the integer range).
+
+  What is still absent, checked by code search over that repository:
+  `bfloat16`, `float16`, `per_channel`, `requant` all return 0 matches. So
+  there is no 16-bit float type, no per-channel scale, no integer-only
+  requantization path, no fixed-point type, no GGML Q4_0 block, and no
+  error reporting. The operator lives inside a graph runner and is not an
+  importable type layer.
+
+  This project's contribution should therefore be argued on those axes, not
+  on "no int8 support in the ecosystem".
 
 ## Fields where the ecosystem is already dense (do not rebuild)
 

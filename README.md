@@ -1,9 +1,10 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.7.0 ships **IEEE 754
-binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with
-signal-to-noise reporting, published reference vectors and a command-line
-inspector, everything checked against independent references.
+Low-precision numeric types for MoonBit. Version 0.8.0 ships **IEEE 754
+binary16**, **bfloat16**, **fixed-point**, **affine quantization** and a
+**GGUF container reader**, with signal-to-noise reporting, published
+reference vectors and a command-line inspector, everything checked against
+independent references.
 
 ## Why this exists
 
@@ -80,9 +81,38 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
   `10 * log10(signal energy / error energy)`, reported as positive infinity
   when nothing is lost
 
+### `GGUF` — container reading
+
+`parse_gguf` reads a GGUF v3 header: metadata pairs are skipped except
+`general.alignment`, and the tensor table keeps each name, dimensions, ggml
+type and payload offset. `dequantize_tensor` turns an `F32` or `Q4_0`
+tensor into binary64 values, block by block for Q4_0.
+
+The payload never leaves the caller's byte array. That is deliberate: the
+targets this project builds for have no file access, so a caller that does
+read a file passes the bytes in and gets values back.
+
+Full chain on a container carried as text:
+
+```
+$ moon run cmd/main --target wasm -- gguf <hex>
+gguf v3  alignment 32  tensors 2
+  token_embd.weight  kind 2  n 64  bytes 36
+    re-quantized int8: step 0.031496062992125984  snr 62.606858853953355 dB  max 0.003937007874015741
+  output_norm.weight  kind 0  n 8  bytes 32
+    re-quantized int8: step 0.01968503937007874  snr 47.07591579591082 dB  max 0.007874015748031482
+```
+
+Those figures are the point: a tensor that arrived as Q4_0 still holds
+62.6 dB after another int8 quantization, because the coarser format already
+discarded the fine detail. The test container is synthetic — two tensors,
+324 bytes — but the layout is the published format and the reader is
+checked against it byte for byte, including both nibble orders of a Q4_0
+block.
+
 ## Correctness evidence
 
-`moon test` runs thirty-nine tests on `wasm`, `wasm-gc` and `js`, all
+`moon test` runs forty-two tests on `wasm`, `wasm-gc` and `js`, all
 passing.
 
 Exhaustive checks, not samples:
@@ -154,8 +184,9 @@ multiplier=1342177280 shift=28 code=253 value=1.25
 
 `requant` prints the integer multiplier and shift it derived, so the
 quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
-sixteen-bit scale and sixteen packed bytes; `verify` re-checks the published
-vectors; `selftest` runs seven built-in checks.
+sixteen-bit scale and sixteen packed bytes, `gguf` takes a whole container
+as hex, `verify` re-checks the published vectors, `selftest` runs seven
+built-in checks.
 
 `report` runs the same sine signal through the four rounding modes, which
 is the shortest way to see what rounding costs:
@@ -195,9 +226,11 @@ codes, and the edges of a 16-bit fixed field. `verify_vectors()` returns
 
 ## Roadmap
 
-- 0.8: numeric comparison against `matrixlt/moon-onnx`'s per-tensor int8
+- 0.9: numeric comparison against `matrixlt/moon-onnx`'s per-tensor int8
   operators, so the two implementations can be cross-checked on the one
   overlap they share
+- later: `Q5_0` / `Q8_0` blocks, when a caller actually needs them rather
+  than because the format list has gaps
 
 ## License
 

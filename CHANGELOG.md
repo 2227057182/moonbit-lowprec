@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 — 2026-11-26
+
+GGUF container reading, so the types meet real data.
+
+- `parse_gguf` reads a GGUF v3 header: version, alignment, and the tensor
+  table with names, dimensions, ggml type and payload offset. Metadata is
+  skipped except `general.alignment`; arrays recurse.
+- `dequantize_tensor` turns `F32` and `Q4_0` tensors into binary64 values.
+  Q4_0 goes block by block: 32 weights from 16 packed bytes, weight `j` in
+  the low nibble and weight `j+16` in the high nibble.
+- `bytes_from_hex` lets a container travel as text, because the buildable
+  targets have no file access.
+- `cmd/main gguf <hex>` runs the whole chain and prints per-tensor size plus
+  the SNR of a further int8 quantization.
+- Three tests against a 324-byte container built by an independent script:
+  header fields, both tensor payloads, and rejection of a non-GGUF buffer.
+  Forty-two tests total, passing on the three backends.
+
 ## 0.7.0 — 2026-11-26
 
 Published reference vectors.

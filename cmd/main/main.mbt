@@ -7,6 +7,7 @@ fn usage() -> Unit {
   println("  quant <value> <scale> <zp>   quantize then dequantize with int8")
   println("  requant <q> <in_scale> <in_zp> <out_scale> <out_zp>")
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
+  println("  gguf <hex>              parse a GGUF container and report per tensor")
   println("  report                  compare four rounding modes on a sine signal")
   println("  verify                  check the published reference vectors")
   println("  selftest                run the built-in checks")
@@ -196,6 +197,54 @@ fn show_q4_0(scale_bits : Int, bytes : Array[Int]) -> Unit {
   println(text)
 }
 
+fn show_gguf(hex : String) -> Unit {
+  let bytes = @lib.bytes_from_hex(hex)
+  match @lib.parse_gguf(bytes) {
+    Some(f) => {
+      println(
+        "gguf v" + f.version.to_string() +
+        "  alignment " + f.alignment.to_string() +
+        "  tensors " + f.tensors.length().to_string(),
+      )
+      for i = 0; i < f.tensors.length(); i = i + 1 {
+        let t = f.tensors[i]
+        let size = t.byte_size()
+        if size == 0 {
+          println("  " + t.name + "  kind " + t.kind.to_string() + "  unsupported")
+        } else {
+          let values = @lib.dequantize_tensor(bytes, f, t)
+          let mut max_abs = 0.0
+          for k = 0; k < values.length(); k = k + 1 {
+            let v = values[k]
+            let a = if v < 0.0 { -v } else { v }
+            if a > max_abs {
+              max_abs = a
+            }
+          }
+          println(
+            "  " + t.name + "  kind " + t.kind.to_string() +
+            "  n " + values.length().to_string() +
+            "  bytes " + size.to_string(),
+          )
+          if max_abs == 0.0 {
+            println("    all zero weights, nothing to quantize")
+          } else {
+            let scale = max_abs / 127.0
+            let p = @lib.QuantParams::int8(scale, 0)
+            let r = @lib.quantization_report(values, p, @lib.NearestEven)
+            println(
+              "    re-quantized int8: step " + scale.to_string() +
+              "  snr " + r.snr_db.to_string() + " dB" +
+              "  max " + r.max_abs_error.to_string(),
+            )
+          }
+        }
+      }
+    }
+    None => println("not a gguf v3 container")
+  }
+}
+
 fn demo_report() -> Unit {
   // A sine sweep with amplitude 1: the usual shape of a normalized weight
   // or activation, quantized at int8 with a step of 1/128.
@@ -287,6 +336,8 @@ fn main {
       bytes[i] = parse_bits(args[3 + i])
     }
     show_q4_0(scale, bytes)
+  } else if cmd == "gguf" && args.length() >= 3 {
+    show_gguf(args[2])
   } else if cmd == "report" {
     demo_report()
   } else if cmd == "verify" {

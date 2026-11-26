@@ -1,5 +1,5 @@
 /// How a value whose low bits must be dropped is rounded.
-pub enum Rounding {
+pub(all) enum Rounding {
   /// Drop the extra bits: move toward zero.
   TowardZero
   /// Always move toward negative infinity, also called floor.
@@ -14,7 +14,7 @@ pub enum Rounding {
 }
 
 /// What happens when a result leaves the representable range.
-pub enum Overflow {
+pub(all) enum Overflow {
   /// Clamp to the nearest representable endpoint.
   Saturate
   /// Keep only the low `width` bits and reinterpret them as signed.

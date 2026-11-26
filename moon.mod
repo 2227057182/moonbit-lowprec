@@ -1,6 +1,6 @@
 name = "2227057182/moonbit-lowprec"
 
-version = "0.4.0"
+version = "0.5.0"
 
 readme = "README.md"
 

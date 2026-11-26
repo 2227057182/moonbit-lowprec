@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-11-26
+
+A command-line inspector for the types above.
+
+- `cmd/main` executable with `f16`, `bf16`, `fixed`, `quant`, `requant`,
+  `q4_0` and `selftest` subcommands, built on `@env.args()` only.
+- `requant` prints the derived multiplier and shift next to the resulting
+  code, so the integer path can be inspected instead of assumed.
+- `Rounding` and `Overflow` constructors are now `pub(all)`: callers
+  outside the package could previously only reach them through
+  `Rounding::from_int` / `Overflow::from_int`, which made the API awkward to
+  use from another package.
+- No change to the library logic; all thirty-one tests still pass on the
+  three backends.
+
 ## 0.4.0 — 2026-11-26
 
 Affine quantization on top of the fixed-point core.

@@ -1,8 +1,8 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.4.0 ships **IEEE 754
-binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with
-everything checked against independent references.
+Low-precision numeric types for MoonBit. Version 0.5.0 ships **IEEE 754
+binary16**, **bfloat16**, **fixed-point** and **affine quantization**, with a
+command-line inspector, everything checked against independent references.
 
 ## Why this exists
 
@@ -117,10 +117,34 @@ let p = QuantParams::int8(0.05, 0)
 assert_eq(dequantize(quantize(1.25, p, NearestEven), p), 1.25)
 ```
 
+## Inspector
+
+`cmd/main` is a small executable that takes bit patterns and printed values
+on the command line:
+
+```
+$ moon run cmd/main --target wasm -- f16 0x0002
+bits=2 sign=0 exp=0 mant=2 class=subnormal value=1.1920929e-7
+
+$ moon run cmd/main --target wasm -- bf16 0x3F80
+bits=16256 sign=0 exp=127 mant=0 class=normal value=1
+
+$ moon run cmd/main --target wasm -- fixed 3 1 16
+raw=3 frac=1 width=16 valid=true value=1.5
+
+$ moon run cmd/main --target wasm -- requant 25 0.05 0 0.01 128
+multiplier=1342177280 shift=28 code=253 value=1.25
+```
+
+`requant` prints the integer multiplier and shift it derived, so the
+quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
+sixteen-bit scale and sixteen packed bytes; `selftest` runs seven built-in
+checks.
+
 ## Roadmap
 
-- 0.5: command-line inspector for float bit patterns and quantization
-  parameters, plus a comparison report against reference vectors
+- 0.6: reference vectors exported from the exhaustive checks, so downstream
+  projects can verify their own low-precision layer against this one
 
 ## License
 

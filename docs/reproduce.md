@@ -11,7 +11,23 @@ moon test --target js
 ```
 
 Expected: `moon check` finishes with no warnings; each test run prints
-`Total tests: 31, passed: 31, failed: 0`.
+`Total tests: 37, passed: 37, failed: 0`. The command-line inspector
+reproduces the numbers quoted in the proposal:
+
+```sh
+moon run cmd/main --target wasm -- f16 0x0002
+moon run cmd/main --target wasm -- bf16 0x3F80
+moon run cmd/main --target wasm -- fixed 3 1 16
+moon run cmd/main --target wasm -- quant 1.25 0.05 0
+moon run cmd/main --target wasm -- requant 25 0.05 0 0.01 128
+moon run cmd/main --target wasm -- report
+moon run cmd/main --target wasm -- selftest
+```
+
+`f16 0x0002` prints `value=1.1920929e-7` (2 × 2^-24), `requant` prints
+`multiplier=1342177280 shift=28 code=253 value=1.25`, `report` prints
+49.64783777764896 dB for nearest-even against 43.7 to 44.3 dB for the three
+truncating modes, and `selftest` prints `selftest 7/7 passed`.
 
 ## What each exhaustive test covers
 
@@ -26,6 +42,11 @@ Expected: `moon check` finishes with no warnings; each test run prints
   values, adding one, both overflow modes.
 - `integral requantization matches the double reference` — all 256 int8
   codes.
+- `nearest even never exceeds half a step` — 990 signal points across
+  -0.99..0.99, bound is half the scale; `toward zero is worse than nearest
+  even` requires a strictly larger maximum error on the same points.
+- `snr matches a double reference` — the reported decibels equal
+  `10 * log10(signal / noise)` computed directly in `Double`.
 
 ## Where the reference values come from
 

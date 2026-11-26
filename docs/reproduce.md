@@ -11,7 +11,7 @@ moon test --target js
 ```
 
 Expected: `moon check` finishes with no warnings; each test run prints
-`Total tests: 37, passed: 37, failed: 0`. The command-line inspector
+`Total tests: 39, passed: 39, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -21,13 +21,15 @@ moon run cmd/main --target wasm -- fixed 3 1 16
 moon run cmd/main --target wasm -- quant 1.25 0.05 0
 moon run cmd/main --target wasm -- requant 25 0.05 0 0.01 128
 moon run cmd/main --target wasm -- report
+moon run cmd/main --target wasm -- verify
 moon run cmd/main --target wasm -- selftest
 ```
 
 `f16 0x0002` prints `value=1.1920929e-7` (2 × 2^-24), `requant` prints
 `multiplier=1342177280 shift=28 code=253 value=1.25`, `report` prints
 49.64783777764896 dB for nearest-even against 43.7 to 44.3 dB for the three
-truncating modes, and `selftest` prints `selftest 7/7 passed`.
+truncating modes, `verify` prints `vectors 60/60 reproduce`, and `selftest`
+prints `selftest 7/7 passed`.
 
 ## What each exhaustive test covers
 
@@ -47,6 +49,9 @@ truncating modes, and `selftest` prints `selftest 7/7 passed`.
   even` requires a strictly larger maximum error on the same points.
 - `snr matches a double reference` — the reported decibels equal
   `10 * log10(signal / noise)` computed directly in `Double`.
+- `published vectors reproduce` — all 60 published rows re-checked against
+  the live implementation, and `vector table covers the extremes of every
+  type` pins both ends of each type so a trimmed table cannot pass silently.
 
 ## Where the reference values come from
 

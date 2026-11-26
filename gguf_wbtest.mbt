@@ -75,3 +75,14 @@ test "a non-gguf byte array is rejected" {
     None => assert_eq(true, true)
   }
 }
+
+test "a truncated payload is rejected" {
+  // Same header, last 8 bytes of the F32 tensor removed. The header is
+  // still well formed, so only the extent check can catch this.
+  let truncated = tiny_gguf_hex[0:tiny_gguf_hex.length() - 16].to_owned()
+  let bytes = bytes_from_hex(truncated)
+  match parse_gguf(bytes) {
+    Some(_) => assert_eq("truncated", "accepted")
+    None => assert_eq(bytes.length(), 316)
+  }
+}

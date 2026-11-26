@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1 — 2026-11-26
+
+- `parse_gguf` checks every tensor extent against the buffer. A header that
+  advertises payload which is not there now returns `None` instead of
+  letting a later read run past the end.
+- Test for a container truncated by eight payload bytes: the header still
+  parses, so only the extent check catches it. Forty-three tests.
+- `tools/make_gguf.py` regenerates the 324-byte fixture and prints the same
+  hex the tests embed, byte for byte.
+
 ## 0.8.0 — 2026-11-26
 
 GGUF container reading, so the types meet real data.

@@ -11,7 +11,7 @@ moon test --target js
 ```
 
 Expected: `moon check` finishes with no warnings; each test run prints
-`Total tests: 39, passed: 39, failed: 0`. The command-line inspector
+`Total tests: 43, passed: 43, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -24,6 +24,18 @@ moon run cmd/main --target wasm -- report
 moon run cmd/main --target wasm -- verify
 moon run cmd/main --target wasm -- selftest
 ```
+
+The container command needs the file bytes on the command line, because
+the targets this project builds for have no file access:
+
+```sh
+python tools/make_gguf.py            # writes tiny.gguf, prints its hex
+moon run cmd/main --target wasm -- gguf <that hex>
+```
+
+`python tools/make_gguf.py` is deterministic: it writes 324 bytes, and the
+same hex string is the one embedded in `gguf_wbtest.mbt`, so the fixture
+used by the tests can be regenerated and compared byte for byte.
 
 `f16 0x0002` prints `value=1.1920929e-7` (2 × 2^-24), `requant` prints
 `multiplier=1342177280 shift=28 code=253 value=1.25`, `report` prints
@@ -52,6 +64,15 @@ prints `selftest 7/7 passed`.
 - `published vectors reproduce` — all 60 published rows re-checked against
   the live implementation, and `vector table covers the extremes of every
   type` pins both ends of each type so a trimmed table cannot pass silently.
+- `parse the tiny gguf header` — every header field of the 324-byte
+  container: version, alignment, both tensor names, dimensions, ggml types,
+  offsets and computed byte sizes.
+- `dequantize a q4_0 tensor and an f32 tensor` — 64 weights block by block,
+  both nibble orders, plus the eight F32 values.
+- `a non-gguf byte array is rejected` — 24 bytes of junk must not parse.
+- `a truncated payload is rejected` — the same header with the last eight
+  payload bytes removed: the header alone still parses, so only the extent
+  check can catch it.
 
 ## Where the reference values come from
 

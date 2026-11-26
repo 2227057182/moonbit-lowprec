@@ -180,6 +180,20 @@ pub fn parse_gguf(bytes : Array[Byte]) -> Option[GgufFile] {
   while data_start % alignment != 0 {
     data_start = data_start + 1
   }
+  // A header can be well formed and still describe payload that is not
+  // there. Check every advertised extent against the buffer instead of
+  // letting a later read go past the end.
+  if data_start > n {
+    return None
+  }
+  let payload_len = n - data_start
+  for i = 0; i < tensors.length(); i = i + 1 {
+    let t = tensors[i]
+    let size = t.byte_size()
+    if t.offset < 0 || (size > 0 && t.offset + size > payload_len) {
+      return None
+    }
+  }
   Some({ version, alignment, tensors, data_start })
 }
 

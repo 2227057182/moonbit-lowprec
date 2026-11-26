@@ -191,36 +191,36 @@ pub fn F16::from_double(x : Double) -> F16 {
 }
 
 /// The smallest positive subnormal, `2^-24`.
-pub fn min_subnormal() -> F16 {
+pub fn F16::min_subnormal() -> F16 {
   F16::from_bits(0x0001)
 }
 
 /// The smallest positive normal, `2^-14`.
-pub fn min_normal() -> F16 {
+pub fn F16::min_normal() -> F16 {
   F16::from_bits(0x0400)
 }
 
 /// The largest finite value, 65504.
-pub fn max_value() -> F16 {
+pub fn F16::max_value() -> F16 {
   F16::from_bits(0x7BFF)
 }
 
 /// Positive infinity.
-pub fn infinity() -> F16 {
+pub fn F16::infinity() -> F16 {
   F16::from_bits(0x7C00)
 }
 
 /// Quiet NaN with the canonical payload.
-pub fn nan() -> F16 {
+pub fn F16::nan() -> F16 {
   F16::from_bits(0x7E00)
 }
 
 /// Precision in bits of the significand, including the implicit bit.
-pub fn precision() -> Int {
+pub fn F16::precision() -> Int {
   11
 }
 
 /// Machine epsilon, `2^-10`.
-pub fn epsilon() -> F16 {
+pub fn F16::epsilon() -> F16 {
   F16::from_bits(0x1400)
 }

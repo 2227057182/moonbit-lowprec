@@ -79,13 +79,13 @@ test "overflow to infinity and underflow to zero" {
 
 /// Special values round-trip through the public constructors.
 test "special value constructors" {
-  assert_true(min_subnormal().is_subnormal())
-  assert_true(min_normal().is_normal())
-  assert_true(max_value().is_finite())
-  assert_true(infinity().is_infinite())
-  assert_true(nan().is_nan())
-  assert_eq(precision(), 11)
-  assert_eq(epsilon().to_float(), 1.0 / 1024.0)
+  assert_true(F16::min_subnormal().is_subnormal())
+  assert_true(F16::min_normal().is_normal())
+  assert_true(F16::max_value().is_finite())
+  assert_true(F16::infinity().is_infinite())
+  assert_true(F16::nan().is_nan())
+  assert_eq(F16::precision(), 11)
+  assert_eq(F16::epsilon().to_float(), 1.0 / 1024.0)
 }
 
 /// Masking keeps only the low sixteen bits.

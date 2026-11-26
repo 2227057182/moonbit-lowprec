@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 — 2026-11-26
+
+Fixed-point arithmetic.
+
+- `Fixed` type: `raw * 2^-frac` in a `width`-bit field, stored in `Int`.
+- Five rounding modes (`TowardZero`, `TowardNegative`, `TowardPositive`,
+  `NearestEven`, `NearestAway`) defined on the magnitude with the sign
+  restored, so negatives follow the named direction.
+- Two overflow modes (`Saturate`, `Wrap`), applied only when a result is
+  settled into the field.
+- `add`, `sub`, `neg`, `abs`, `mul`, `div`, `rescale`, plus `mul_raw` for
+  exact multi-term accumulation.
+- Exhaustive tests: 327680 multiplication results against an independent
+  `Double` reference, exact widening multiply over all 8-bit pairs, and
+  saturation/wrap over every 16-bit raw value.
+- `Rounding::from_int` and `Overflow::from_int` for command-line parsing.
+- Twenty-three tests passing on wasm, wasm-gc and js.
+
 ## 0.2.0 — 2026-11-26
 
 bfloat16 joins binary16.

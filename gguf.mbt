@@ -250,15 +250,23 @@ pub fn GgufTensor::byte_size(self : GgufTensor) -> Int {
     (n / 32) * 22
   } else if self.kind == 8 {
     (n / 32) * 34
+  } else if self.kind == 12 {
+    (n / 256) * 144
+  } else if self.kind == 13 {
+    (n / 256) * 176
+  } else if self.kind == 14 {
+    (n / 256) * 210
   } else {
     0
   }
 }
 
 /// Dequantizes a tensor into binary64 values. F32 is widened directly; the
-/// three block formats go block by block, 32 weights at a time: Q4_0 in 18
-/// bytes, Q5_0 in 22 (two bytes of scale, four of high bits, sixteen packed
-/// nibbles), Q8_0 in 34 (two bytes of scale, thirty-two signed bytes).
+/// block formats go block by block, 32 weights at a time: Q4_0 in 18 bytes,
+/// Q5_0 in 22 (two bytes of scale, four of high bits, sixteen packed nibbles),
+/// Q8_0 in 34 (two bytes of scale, thirty-two signed bytes), Q4_K in 144 and
+/// Q6_K in 210 for 256 weights (the K-quant super-block used by the Q4_K_M
+/// and Q6_K files llama.cpp ships).
 pub fn dequantize_tensor(
   bytes : Array[Byte],
   file : GgufFile,
@@ -311,6 +319,115 @@ pub fn dequantize_tensor(
         out[b * 32 + j] = Double::from_int(signed) * scale
       }
     }
+  } else if t.kind == 12 {
+    // Q4_K: 256 weights in 144 bytes. One f16 scale `d` multiplies the 6-bit
+    // sub-scales, one f16 `dmin` multiplies the 6-bit mins, and the weights
+    // are 4-bit unsigned with `d * sc * q - dmin * m` applied per 32 weights.
+    // The twenty-four packed scale bits are unpacked exactly as llama.cpp's
+    // get_scale_min_k4 does.
+    let blocks = n / 256
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 144
+      let d = F16::from_bits(read_u16(bytes, o)).to_double()
+      let dmin = F16::from_bits(read_u16(bytes, o + 2)).to_double()
+      for g = 0; g < 4; g = g + 1 {
+        let si = g * 2
+        let (sc1, m1) = k4_scale_min(bytes, o + 4, si)
+        let (sc2, m2) = k4_scale_min(bytes, o + 4, si + 1)
+        let q = o + 16 + g * 32
+        let ds1 = d * Double::from_int(sc1)
+        let dm1 = dmin * Double::from_int(m1)
+        let ds2 = d * Double::from_int(sc2)
+        let dm2 = dmin * Double::from_int(m2)
+        for l = 0; l < 32; l = l + 1 {
+          let packed = byte_at(bytes, q + l)
+          out[b * 256 + g * 64 + l] = ds1 * Double::from_int(packed & 15) - dm1
+          out[b * 256 + g * 64 + 32 + l] = ds2 * Double::from_int(packed >> 4) - dm2
+        }
+      }
+    }
+  } else if t.kind == 13 {
+    // Q5_K: 256 weights in 176 bytes. Same twelve packed scale/min bytes as
+    // Q4_K, but the fifth bit of every weight lives in 32 shared bytes: for
+    // group g the low nibbles take bit 2g and the high nibbles bit 2g+1 of
+    // the same byte, which is why llama.cpp shifts a mask instead of moving
+    // the pointer. The weight is unsigned and offset by `dmin * m`.
+    let blocks = n / 256
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 176
+      let d = F16::from_bits(read_u16(bytes, o)).to_double()
+      let dmin = F16::from_bits(read_u16(bytes, o + 2)).to_double()
+      let qh = o + 16
+      let ql = o + 48
+      for g = 0; g < 4; g = g + 1 {
+        let si = g * 2
+        let (sc1, m1) = k4_scale_min(bytes, o + 4, si)
+        let (sc2, m2) = k4_scale_min(bytes, o + 4, si + 1)
+        let ds1 = d * Double::from_int(sc1)
+        let dm1 = dmin * Double::from_int(m1)
+        let ds2 = d * Double::from_int(sc2)
+        let dm2 = dmin * Double::from_int(m2)
+        for l = 0; l < 32; l = l + 1 {
+          let packed = byte_at(bytes, ql + g * 32 + l)
+          let high = byte_at(bytes, qh + l)
+          let fifth_low = if ((high >> (2 * g)) & 1) == 1 { 16 } else { 0 }
+          let fifth_high = if ((high >> (2 * g + 1)) & 1) == 1 { 16 } else { 0 }
+          out[b * 256 + g * 64 + l] =
+            ds1 * Double::from_int((packed & 15) + fifth_low) - dm1
+          out[b * 256 + g * 64 + 32 + l] =
+            ds2 * Double::from_int((packed >> 4) + fifth_high) - dm2
+        }
+      }
+    }
+  } else if t.kind == 14 {
+    // Q6_K: 256 weights in 210 bytes: 128 low nibbles, 64 high-bit pairs,
+    // 16 signed sub-scales and one f16 scale. Weights are 6-bit signed
+    // (biased by 32), scales are int8.
+    let blocks = n / 256
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 210
+      let d = F16::from_bits(read_u16(bytes, o + 208)).to_double()
+      for seg = 0; seg < 2; seg = seg + 1 {
+        let ql = o + seg * 64
+        let qh = o + 128 + seg * 32
+        let sc = o + 192 + seg * 8
+        for l = 0; l < 32; l = l + 1 {
+          let si = l / 16
+          let h = byte_at(bytes, qh + l)
+          let low = byte_at(bytes, ql + l)
+          let high = byte_at(bytes, ql + l + 32)
+          let q1 = ((low & 15) | ((h & 3) << 4)) - 32
+          let q2 = ((high & 15) | (((h >> 2) & 3) << 4)) - 32
+          let q3 = ((low >> 4) | (((h >> 4) & 3) << 4)) - 32
+          let q4 = ((high >> 4) | (((h >> 6) & 3) << 4)) - 32
+          let base_out = b * 256 + seg * 128
+          out[base_out + l] = d * signed_byte(bytes, sc + si) * Double::from_int(q1)
+          out[base_out + l + 32] = d * signed_byte(bytes, sc + si + 2) * Double::from_int(q2)
+          out[base_out + l + 64] = d * signed_byte(bytes, sc + si + 4) * Double::from_int(q3)
+          out[base_out + l + 96] = d * signed_byte(bytes, sc + si + 6) * Double::from_int(q4)
+        }
+      }
+    }
   }
   out
+}
+
+/// llama.cpp's get_scale_min_k4: the first four sub-scales and mins sit in the
+/// low six bits of `q[0..4]` and `q[4..8]`; the high two bits are stored in
+/// `q[0..4]` (scales) and `q[4..8]` (mins) again, six at a time, for the
+/// second four, whose low four bits live in the nibbles of `q[8..12]`.
+fn k4_scale_min(b : Array[Byte], qbase : Int, j : Int) -> (Int, Int) {
+  if j < 4 {
+    (byte_at(b, qbase + j) & 63, byte_at(b, qbase + j + 4) & 63)
+  } else {
+    let sc = (byte_at(b, qbase + j + 4) & 15) | ((byte_at(b, qbase + j - 4) >> 6) << 4)
+    let mn = (byte_at(b, qbase + j + 4) >> 4) | ((byte_at(b, qbase + j) >> 6) << 4)
+    (sc, mn)
+  }
+}
+
+/// A byte read as a signed 8-bit integer.
+fn signed_byte(b : Array[Byte], o : Int) -> Double {
+  let raw = byte_at(b, o)
+  Double::from_int(if raw >= 128 { raw - 256 } else { raw })
 }

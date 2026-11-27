@@ -103,6 +103,47 @@ def parse_container(data):
     return version, alignment, kv, tensors, data_start
 
 
+def q4_k_block():
+    """One 144-byte Q4_K super-block of 256 weights.
+
+    Fields, in order: f16 d, f16 dmin, twelve packed scale/min bytes, then
+    128 bytes of 4-bit weights. The twelve bytes are laid out so that all
+    eight sub-blocks differ and every unpack path is exercised: scales
+    1..4 and mins 5..8 live in the low six bits, the high two bits of the
+    first four bytes raise scales 4..7 to 17..20, and the nibbles of the
+    last four bytes supply their low four bits.
+    """
+    head = struct.pack("<e", 0.5) + struct.pack("<e", 0.25)
+    scales = bytes([0x41, 0x42, 0x43, 0x44, 5, 6, 7, 8, 0x11, 0x22, 0x33, 0x44])
+    qs = bytes(((l + g) % 16) | (((l + g + 4) % 16) << 4) for g in range(4) for l in range(32))
+    return head + scales + qs
+
+
+def q5_k_block():
+    """One 176-byte Q5_K super-block of 256 weights.
+
+    Same twelve packed bytes as Q4_K, then 32 bytes of fifth bits and 128
+    bytes of 4-bit weights. Group g reads bit 2g for the low nibbles and bit
+    2g+1 for the high nibbles of the shared byte, so all eight bits of every
+    byte are used across the four groups.
+    """
+    head = struct.pack("<e", 0.5) + struct.pack("<e", 0.25)
+    scales = bytes([0x41, 0x42, 0x43, 0x44, 5, 6, 7, 8, 0x11, 0x22, 0x33, 0x44])
+    qh = bytes((l * 3) & 0xFF for l in range(32))
+    qs = bytes(((l + g) % 16) | (((l + g + 4) % 16) << 4) for g in range(4) for l in range(32))
+    return head + scales + qh + qs
+
+
+def q6_k_block():
+    """One 210-byte Q6_K super-block of 256 weights: ql, qh, int8 scales, f16 d."""
+    ql = bytes(((l + 3 * s) % 16) | (((l + 5 * s + 7) % 16) << 4)
+               for s in range(2) for l in range(64))
+    qh = bytes((l % 4) | (((l + 1) % 4) << 2) | (((l + 2) % 4) << 4) | (((l + 3) % 4) << 6)
+               for s in range(2) for l in range(32))
+    scales = struct.pack("<16b", -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7)
+    return ql + qh + scales + struct.pack("<e", 0.25)
+
+
 def write_container(path):
     qs = bytearray(16)
     for j in range(16):
@@ -120,7 +161,7 @@ def write_container(path):
     out = bytearray()
     out += MAGIC
     out += struct.pack("<I", 3)
-    out += struct.pack("<Q", 4)
+    out += struct.pack("<Q", 7)
     out += struct.pack("<Q", 2)
     for key, value in (("general.architecture", "llama"), ("general.name", "lowprec-fixture")):
         out += struct.pack("<Q", len(key)) + key.encode()
@@ -131,6 +172,9 @@ def write_container(path):
         ("blk.0.test_q5_0", [32], 6, 32, block_q5),
         ("blk.0.test_q8_0", [32], 8, 64, block_q8),
         ("blk.0.test_f32", [32], 0, 128, f32),
+        ("blk.0.test_q4_k", [256], 12, 256, q4_k_block()),
+        ("blk.0.test_q6_k", [256], 14, 416, q6_k_block()),
+        ("blk.0.test_q5_k", [256], 13, 640, q5_k_block()),
     ]
     for name, dims, kind, offset, _ in tensors:
         out += struct.pack("<Q", len(name)) + name.encode()

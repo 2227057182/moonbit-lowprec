@@ -97,6 +97,64 @@ def f32(p):
     return [struct.unpack_from("<f", p, 4 * j)[0] for j in range(32)]
 
 
+def k4_scale_min(p, qbase, j):
+    """llama.cpp's get_scale_min_k4 (ggml-quants.c:889), written from its body."""
+    if j < 4:
+        return p[qbase + j] & 63, p[qbase + j + 4] & 63
+    return ((p[qbase + j + 4] & 15) | ((p[qbase + j - 4] >> 6) << 4),
+            (p[qbase + j + 4] >> 4) | ((p[qbase + j] >> 6) << 4))
+
+
+def q4_k(p):
+    d = half(p, 0)
+    dmin = half(p, 2)
+    out = [0.0] * 256
+    for g in range(4):
+        sc1, m1 = k4_scale_min(p, 4, g * 2)
+        sc2, m2 = k4_scale_min(p, 4, g * 2 + 1)
+        for l in range(32):
+            q = p[16 + g * 32 + l]
+            out[g * 64 + l] = d * sc1 * (q & 15) - dmin * m1
+            out[g * 64 + 32 + l] = d * sc2 * (q >> 4) - dmin * m2
+    return out
+
+
+def q5_k(p):
+    d = half(p, 0)
+    dmin = half(p, 2)
+    out = [0.0] * 256
+    for g in range(4):
+        sc1, m1 = k4_scale_min(p, 4, g * 2)
+        sc2, m2 = k4_scale_min(p, 4, g * 2 + 1)
+        for l in range(32):
+            b = p[48 + g * 32 + l]
+            h = p[16 + l]
+            v1 = (b & 15) + (16 if (h >> (2 * g)) & 1 else 0)
+            v2 = (b >> 4) + (16 if (h >> (2 * g + 1)) & 1 else 0)
+            out[g * 64 + l] = d * sc1 * v1 - dmin * m1
+            out[g * 64 + 32 + l] = d * sc2 * v2 - dmin * m2
+    return out
+
+
+def q6_k(p):
+    d = half(p, 208)
+    out = [0.0] * 256
+    for s in range(2):
+        ql, qh, sc = s * 64, 128 + s * 32, 192 + s * 8
+        for l in range(32):
+            i = l // 16
+            h = p[qh + l]
+            q1 = ((p[ql + l] & 15) | ((h & 3) << 4)) - 32
+            q2 = ((p[ql + 32 + l] & 15) | (((h >> 2) & 3) << 4)) - 32
+            q3 = ((p[ql + l] >> 4) | (((h >> 4) & 3) << 4)) - 32
+            q4 = ((p[ql + 32 + l] >> 4) | (((h >> 6) & 3) << 4)) - 32
+            out[s * 128 + l] = d * signed(p[sc + i]) * q1
+            out[s * 128 + l + 32] = d * signed(p[sc + i + 2]) * q2
+            out[s * 128 + l + 64] = d * signed(p[sc + i + 4]) * q3
+            out[s * 128 + l + 96] = d * signed(p[sc + i + 6]) * q4
+    return out
+
+
 def fmt(v):
     s = repr(float(v))
     if "e" in s or "E" in s:
@@ -109,7 +167,7 @@ TEMPLATE = '''/// Fixtures built by `tools/make_gguf_fixtures.py`, an independen
 /// `tools/emit_gguf_test.py`, a second implementation of the block layouts.
 ///
 /// `fixture_gguf_hex` is a complete {size}-byte container holding one block
-/// each of Q4_0, Q5_0 and Q8_0 plus a 32-value F32 tensor.
+/// each of Q4_0, Q5_0, Q8_0, Q4_K, Q6_K and Q5_K plus a 32-value F32 tensor.
 ///
 /// `real_header_hex` is the first 24 bytes of stories260K.gguf, a released
 /// model whose sha256 is
@@ -140,7 +198,7 @@ test "a fixture container parses and dequantizes" {{
   let bytes = bytes_from_hex(fixture_gguf_hex)
   let file = parse_gguf(bytes).unwrap()
   assert_eq(file.version, 3)
-  assert_eq(file.tensors.length(), 4)
+  assert_eq(file.tensors.length(), 7)
   assert_eq(file.data_start, {data_start})
   assert_eq(file.tensors[0].name, "blk.0.test_q4_0")
   assert_eq(file.tensors[0].kind, 2)
@@ -150,9 +208,16 @@ test "a fixture container parses and dequantizes" {{
   assert_eq(file.tensors[2].kind, 8)
   assert_eq(file.tensors[3].name, "blk.0.test_f32")
   assert_eq(file.tensors[3].kind, 0)
+  assert_eq(file.tensors[4].name, "blk.0.test_q4_k")
+  assert_eq(file.tensors[4].kind, 12)
+  assert_eq(file.tensors[5].name, "blk.0.test_q6_k")
+  assert_eq(file.tensors[5].kind, 14)
+  assert_eq(file.tensors[6].name, "blk.0.test_q5_k")
+  assert_eq(file.tensors[6].kind, 13)
   assert_eq(file.tensors[0].dims[0], 32)
+  assert_eq(file.tensors[4].dims[0], 256)
 
-  // All three blocks carry the same 0.5 scale, so the weights are exact
+  // All blocks carry the same 0.5 scale, so the weights are exact
   // multiples of 0.5 and the expected values below are literals.
   let q4 = dequantize_tensor(bytes, file, file.tensors[0])
 {q4}
@@ -162,6 +227,12 @@ test "a fixture container parses and dequantizes" {{
 {q8}
   let w = dequantize_tensor(bytes, file, file.tensors[3])
 {w}
+  let q4k = dequantize_tensor(bytes, file, file.tensors[4])
+{q4k}
+  let q6k = dequantize_tensor(bytes, file, file.tensors[5])
+{q6k}
+  let q5k = dequantize_tensor(bytes, file, file.tensors[6])
+{q5k}
 }}
 '''
 
@@ -183,6 +254,9 @@ def main():
         "q5": (q5_0(block(tensors[1], 22)), [0, 15, 16, 31]),
         "q8": (q8_0(block(tensors[2], 34)), [0, 7, 31]),
         "w": (f32(block(tensors[3], 128)), [0, 7, 31]),
+        "q4k": (q4_k(block(tensors[4], 144)), [0, 31, 32, 64, 96, 128, 255]),
+        "q6k": (q6_k(block(tensors[5], 210)), [0, 31, 32, 64, 96, 128, 255]),
+        "q5k": (q5_k(block(tensors[6], 176)), [0, 31, 32, 64, 96, 128, 255]),
     }
     lines = {}
     for name, (values, picks) in expected.items():

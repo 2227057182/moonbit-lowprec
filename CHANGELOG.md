@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.13.0 — 2026-11-27
+
+Direct conversions between the formats, in integer arithmetic.
+
+- `convert.mbt` adds `F16::from_bf16`, `BF16::from_f16`, `F16::from_e4m3`,
+  `F16::from_e5m2`, `E5M2::from_e4m3` and `E4M3::from_e5m2`. None of them
+  goes through binary32: the sign moves as a bit, the exponent is added to or
+  rebased from a bias, and the significand is shifted once, with ties to even
+  when bits are dropped.
+- bfloat16 to binary16 is the one direction that never rounds, because seven
+  significand bits fit in ten. Only the exponent range changes: values above
+  65504 become infinity (28674 patterns), and everything below half of 2^-24
+  becomes zero (26112 patterns, the 254 subnormals among them).
+- e5m2 to e4m3 is exact for normals for the same reason in reverse, saturates
+  at 448 (60 patterns: both infinities, the two 448s and 56 larger values) and
+  sends the three subnormals to zero.
+- The exhaustive check found a real defect in this release. `round_shift_even`
+  took a shift of 64 or more straight to a right shift, but MoonBit's `Int64`
+  shifts wrap modulo the word width, so `1 << 71` became `1 << 7` and a
+  bfloat16 value near 1.6e-27 came out as the smallest binary16 subnormal
+  instead of zero. Shifts of 64 or more now return zero with the reason written
+  down, and the exhaustive bfloat16 to binary16 test covers the case.
+- Seven new tests, 83 in all: every bfloat16 pattern (65536, NaN compared by
+  class only) and every binary16 pattern against the binary64 path, the
+  positive bfloat16 half checked for monotonicity with zero backward steps,
+  all 256 patterns of e4m3 and e5m2 into binary16, the 256 e4m3 to e5m2
+  patterns, and the 256 e5m2 to e4m3 patterns with the saturation count fixed
+  at 60.
+- The CLI gained `convert <from> <to> <bits>`, covering the six integer
+  conversions plus binary16 into either fp8 format.
+
 ## 0.12.0 — 2026-11-27
 
 The three K-quant super-blocks, the formats behind the Q4_K_M, Q5_K_M and

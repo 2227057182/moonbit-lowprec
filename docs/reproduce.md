@@ -14,7 +14,7 @@ moon test --target js
 Expected: `moon check` finishes with no errors; on 0.1.20261023 no warnings,
 on 0.1.20261104 the only output is the deprecation notice for
 `Double::from_int` / `Int64::from_int`. Each test run prints
-`Total tests: 76, passed: 76, failed: 0`. The command-line inspector
+`Total tests: 83, passed: 83, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -26,6 +26,8 @@ moon run cmd/main --target wasm -- requant 25 0.05 0 0.01 128
 moon run cmd/main --target wasm -- report
 moon run cmd/main --target wasm -- verify
 moon run cmd/main --target wasm -- selftest
+moon run cmd/main --target wasm -- convert bf16 f16 0x3F80
+moon run cmd/main --target wasm -- convert e5m2 e4m3 0x7C
 ```
 
 The container command needs the file bytes on the command line, because
@@ -133,6 +135,19 @@ prints `selftest 7/7 passed`.
 - `nan patterns are exactly the ones the formats define` — 2 and 6.
 - `published constants match their patterns` — 448, 57344, 2^-9, 2^-6, 2^-16,
   2^-14.
+- `every bfloat16 pattern reaches binary16 as the double path does` — all
+  65536 patterns, NaN compared by class; the counts are pinned at 28674
+  overflowing to infinity and 26112 flushing to zero.
+- `every binary16 pattern reaches bfloat16 as the double path does` — all
+  65536 patterns against the binary64 round, ties to even.
+- `bfloat16 to binary16 keeps the order of the finite patterns` — 0..0x7F7F
+  must not go backwards, and the test counts any step that does.
+- `every e4m3 pattern widens exactly` and `every e5m2 pattern widens exactly`
+  — 256 patterns each into binary16.
+- `e4m3 reaches e5m2 as the float path does` — 256 patterns, one significand
+  bit dropped.
+- `e5m2 reaches e4m3 as the float path does, saturating above 448` — 256
+  patterns, with 60 of them saturated.
 
 ## Where the reference values come from
 

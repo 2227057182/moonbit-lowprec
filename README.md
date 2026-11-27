@@ -1,12 +1,13 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.9.0 ships **IEEE 754
-binary16**, **bfloat16**, **fixed-point**, **affine quantization** and a
-**GGUF container reader**, and now includes correctly rounded **addition,
-subtraction, multiplication and division** on both 16-bit float types —
-computed on the significand with no floating-point instruction — plus
-signal-to-noise reporting, published reference vectors and a command-line
-inspector, everything checked against independent references.
+Low-precision numeric types for MoonBit. Version 0.13.0 ships **IEEE 754
+binary16**, **bfloat16**, **fixed-point**, **affine quantization**, the two
+**8-bit floats** and a **GGUF container reader** down to the K-quant
+super-blocks, and includes correctly rounded **addition, subtraction,
+multiplication and division** on both 16-bit float types — computed on the
+significand with no floating-point instruction — **direct conversions** between
+the formats, signal-to-noise reporting, published reference vectors and a
+command-line inspector, everything checked against independent references.
 
 ## Why this exists
 
@@ -206,6 +207,25 @@ reader written for the test produces. Its first 24 bytes are in the test
 suite, so the identification path is checked against a file this repository
 did not create.
 
+### Conversions between the formats
+
+The formats convert directly, with integer arithmetic on the patterns rather
+than widening to binary32 and narrowing again: `F16::from_bf16`,
+`BF16::from_f16`, `F16::from_e4m3`, `F16::from_e5m2`, `E5M2::from_e4m3` and
+`E4M3::from_e5m2`.
+
+Two are exact and worth stating. bfloat16 to binary16 never rounds: seven
+significand bits fit in ten, so only the exponent range matters — values past
+65504 become infinity and everything under half of 2^-24 becomes zero. e5m2
+to e4m3 is exact for normals because the significand grows from three bits to
+four, and saturates at 448 because the range shrinks.
+
+The other direction of each pair rounds once: binary16 to bfloat16 drops
+three significand bits with ties to even, e4m3 to e5m2 drops one. All six
+are checked by exhaustion against the binary64 path: every bfloat16 and
+binary16 pattern (65282 and 63490 finite values), and all 256 patterns in
+each direction for the fp8 pair.
+
 ## Correctness evidence
 
 `moon test` runs sixty-four tests on `wasm`, `wasm-gc` and `js`, all passing.
@@ -380,6 +400,8 @@ against those rows without running this code.
 - 0.12: `Q4_K`, `Q6_K` and `Q5_K` super-blocks, the formats behind the
   Q4_K_M, Q5_K_M and Q6_K files llama.cpp ships, cross-checked against the
   `gguf` package
+- 0.13: direct conversions between the formats, exact where the target holds
+  more significand bits, and checked by exhaustion
 - later: fp8 dot products, `Q2_K`, when a caller actually needs them rather
   than because the format list has gaps
 

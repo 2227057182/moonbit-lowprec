@@ -1,6 +1,6 @@
 name = "2227057182/moonbit-lowprec"
 
-version = "0.12.0"
+version = "0.13.0"
 
 readme = "README.md"
 
@@ -12,4 +12,4 @@ keywords = ["float16", "bfloat16", "fixed-point", "quantization", "numeric"]
 
 preferred_target = "wasm"
 
-description = "Low-precision numeric types for MoonBit: binary16 and bfloat16 with correctly rounded arithmetic, fixed-point, affine quantization, GGUF block readers including the K-quant super-blocks, and the 8-bit float formats."
+description = "Low-precision numeric types for MoonBit: binary16 and bfloat16 with correctly rounded arithmetic, direct conversions between the low-precision formats, fixed-point, affine quantization, GGUF block readers including the K-quant super-blocks, and the 8-bit float formats."

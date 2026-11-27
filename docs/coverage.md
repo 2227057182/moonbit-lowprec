@@ -97,6 +97,19 @@ for — a value you can store, convert with a stated rounding, and feed into the
 same report as every other format — sits outside it. That is the axis, not the
 block map.
 
+## Conversions between the low-precision formats
+
+The 3975-module scan found no module that converts between binary16 and
+bfloat16 in MoonBit at all, let alone between the two 8-bit float formats;
+the patterns such a module would need (xfp8, msl-gguf, and the K-quant reader
+above) stop at producing a `Float` and never take a low-precision pattern as
+input again. So the six directions here are new surface, not a rebuild.
+
+The claim they carry is narrower and checkable: one rounding, on the
+significand, with no binary32 step in between. Two of the six do not round at
+all, and the changelog says which and why rather than calling all conversions
+"exact".
+
 ## Fields where the ecosystem is already dense (do not rebuild)
 
 Recorded so the choice above is a deliberate comparison, not an accident:

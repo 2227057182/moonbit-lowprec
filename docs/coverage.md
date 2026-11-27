@@ -81,6 +81,22 @@ exact decode, the classification predicates, and the rounding behaviour on the
 way back — including E4M3's unusual corner where the largest finite value and
 the NaN share an all-ones exponent.
 
+## GGUF block coverage in the ecosystem
+
+`soehi/gguf` 0.1.3 is more than a header reader. Its `src/tensor/dequant.mbt`
+dispatches on ggml type ids 0, 1, 2, 6, 8, 12 and 14 — F32, F16, Q4_0, Q5_0,
+Q8_0, Q4_K and Q6_K — and its `scale_min_k4` unpacks the same twelve bytes this
+project does. Stated plainly: **Q4_K and Q6_K dequantization is not a gap**,
+because a MoonBit caller can already get those weights as `Float`.
+
+What that module does not provide, checked file by file: no `Q5_K` (id 13),
+no `Q2_K`/`Q3_K`, no binary16 or bfloat16 arithmetic, no fp8, no fixed-point
+format with a selectable rounding mode, and no error report. Its output is
+`Float` tied to the `Bytes` of a GGUF payload. The layer this project argues
+for — a value you can store, convert with a stated rounding, and feed into the
+same report as every other format — sits outside it. That is the axis, not the
+block map.
+
 ## Fields where the ecosystem is already dense (do not rebuild)
 
 Recorded so the choice above is a deliberate comparison, not an accident:

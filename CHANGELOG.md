@@ -1,14 +1,47 @@
 # Changelog
 
+## 0.12.0 — 2026-11-27
+
+The three K-quant super-blocks, the formats behind the Q4_K_M, Q5_K_M and
+Q6_K files llama.cpp ships.
+
+- `dequantize_tensor` handles `Q4_K` (kind 12), `Q5_K` (kind 13) and `Q6_K`
+  (kind 14). A K-quant block covers 256 weights rather than 32, so
+  `byte_size` grows a super-block branch: 144 bytes for `Q4_K`, 176 for
+  `Q5_K`, 210 for `Q6_K`.
+- `Q4_K`: f16 `d`, f16 `dmin`, twelve packed bytes, then 128 bytes of 4-bit
+  weights. The twelve bytes hold eight six-bit sub-scales and eight six-bit
+  mins; the second four of each take their high two bits from bytes that
+  already carry the first four. Each 32 weights become
+  `d * sc * q - dmin * m`, with the sub-block index advancing every 64 weights.
+  The unpacking follows llama.cpp's `get_scale_min_k4` bit for bit.
+- `Q5_K`: the same twelve packed bytes and the same per-32 formula, with a
+  fifth bit per weight stored in 32 shared bytes. Group `g` reads bit `2g` of
+  the shared byte for the low nibbles and bit `2g+1` for the high nibbles,
+  which is why the llama.cpp kernel shifts a mask rather than advancing the
+  pointer.
+- `Q6_K`: 128 low nibbles, 64 bytes of high bits, sixteen int8 sub-scales and
+  an f16 scale. Weights are 6-bit signed-biased-by-32, sub-scales are signed,
+  and the four weight lanes of each 32-value group take scales at `is + 0/2/4/6`.
+- The fixture container grew to 1264 bytes with one block of each of the seven
+  supported types, so the whole chain is exercised through the same reader a
+  caller uses.
+- Two independent implementations agree with this one. `tools/emit_gguf_test.py`
+  is written from the block layouts alone, and the maintained `gguf` Python
+  package (from the organisation that publishes llama.cpp) dequantizes the
+  same blocks to the same 256 values with a maximum difference of zero.
+- `gguf_kquant_wbtest.mbt`: the twelve-byte scale unpacking against a hand
+  written table, both bit paths, the six-bit maximum, and the super-block
+  payload sizes.
+
 ## 0.11.0 — 2026-11-27
 
 The 8-bit float formats used for fp8 inference.
 
 - `E4M3` (`float8_e4m3fn`): one sign, four exponent bits with a bias of 7,
-  three significand bits, no infinity. `0x7E` is 448 and `0x7E`/`0x7F` sit
-  next to each other, so the NaN test is `(bits & 0x7F) == 0x7F` and not
-  "exponent all ones"; the rules are stated in the source so the corner is
-  not discovered by surprise.
+  three significand bits, no infinity. `0x7E` is 448 and `0x7F` is NaN, so
+  the NaN test is `(bits & 0x7F) == 0x7F` and not "exponent all ones"; the
+  rules are stated in the source so the corner is not discovered by surprise.
 - `E5M2` (`float8_e5m2`): five exponent bits, two significand bits,
   infinities at `0x7C`/`0xFC`, and six NaN patterns.
 - Both widen exactly to binary32, narrow with round-to-nearest ties-to-even

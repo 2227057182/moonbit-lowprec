@@ -246,13 +246,19 @@ pub fn GgufTensor::byte_size(self : GgufTensor) -> Int {
     n * 4
   } else if self.kind == 2 {
     (n / 32) * 18
+  } else if self.kind == 6 {
+    (n / 32) * 22
+  } else if self.kind == 8 {
+    (n / 32) * 34
   } else {
     0
   }
 }
 
-/// Dequantizes a tensor into binary64 values. F32 is widened directly;
-/// Q4_0 goes block by block, 32 weights per 18-byte block.
+/// Dequantizes a tensor into binary64 values. F32 is widened directly; the
+/// three block formats go block by block, 32 weights at a time: Q4_0 in 18
+/// bytes, Q5_0 in 22 (two bytes of scale, four of high bits, sixteen packed
+/// nibbles), Q8_0 in 34 (two bytes of scale, thirty-two signed bytes).
 pub fn dequantize_tensor(
   bytes : Array[Byte],
   file : GgufFile,
@@ -276,6 +282,33 @@ pub fn dequantize_tensor(
         let high = ((packed >> 4) & 15) - 8
         out[b * 32 + j] = Double::from_int(low) * scale
         out[b * 32 + j + 16] = Double::from_int(high) * scale
+      }
+    }
+  } else if t.kind == 6 {
+    // Q5_0: the fifth bit of each weight lives in the four qh bytes, weight j
+    // taking bit j and weight j+16 taking bit j+16.
+    let blocks = n / 32
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 22
+      let scale = F16::from_bits(read_u16(bytes, o)).to_double()
+      let qh = read_u32(bytes, o + 2)
+      for j = 0; j < 16; j = j + 1 {
+        let packed = byte_at(bytes, o + 6 + j)
+        let low5 = ((packed & 15) | (((qh >> j) & 1) << 4)) - 16
+        let high5 = ((packed >> 4) | (((qh >> (j + 16)) & 1) << 4)) - 16
+        out[b * 32 + j] = Double::from_int(low5) * scale
+        out[b * 32 + j + 16] = Double::from_int(high5) * scale
+      }
+    }
+  } else if t.kind == 8 {
+    let blocks = n / 32
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 34
+      let scale = F16::from_bits(read_u16(bytes, o)).to_double()
+      for j = 0; j < 32; j = j + 1 {
+        let raw = byte_at(bytes, o + 2 + j)
+        let signed = if raw >= 128 { raw - 256 } else { raw }
+        out[b * 32 + j] = Double::from_int(signed) * scale
       }
     }
   }

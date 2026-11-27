@@ -11,8 +11,9 @@ Two outputs:
    reader is therefore checked against a file this repository did not produce,
    and the values below were cross-checked with llama.cpp's own gguf reader.
 
-2. A complete container with one Q4_0 block and one F32 tensor, written by
-   this writer and read back by this reader, then embedded in the test.
+2. A complete container with one block each of Q4_0, Q5_0 and Q8_0 plus a
+   thirty-two value F32 tensor, written by this writer and read back by this
+   reader, then embedded in the test.
 
     python3 tools/make_gguf_fixtures.py <path-to-real.gguf>
 """
@@ -107,12 +108,19 @@ def write_container(path):
     for j in range(16):
         qs[j] = j | (((j + 8) % 16) << 4)
     block = struct.pack("<H", 0x3800) + bytes(qs)
+    # Q5_0: scale 0.5, the low nibble of byte j carries weight j and the high
+    # nibble weight j+16; qh holds the fifth bit, all ones for j < 16.
+    q5_qs = bytes((j & 0x0F) | (((15 - j) & 0x0F) << 4) for j in range(16))
+    block_q5 = struct.pack("<H", 0x3800) + struct.pack("<I", 0x0000FFFF) + q5_qs
+    # Q8_0: scale 0.5 and thirty-two signed bytes spanning both signs.
+    q8_qs = bytes((j * 5 - 16) & 0xFF for j in range(32))
+    block_q8 = struct.pack("<H", 0x3800) + q8_qs
     f32 = b"".join(struct.pack("<f", i * 0.25) for i in range(32))
 
     out = bytearray()
     out += MAGIC
     out += struct.pack("<I", 3)
-    out += struct.pack("<Q", 2)
+    out += struct.pack("<Q", 4)
     out += struct.pack("<Q", 2)
     for key, value in (("general.architecture", "llama"), ("general.name", "lowprec-fixture")):
         out += struct.pack("<Q", len(key)) + key.encode()
@@ -120,7 +128,9 @@ def write_container(path):
         out += struct.pack("<Q", len(value)) + value.encode()
     tensors = [
         ("blk.0.test_q4_0", [32], 2, 0, block),
-        ("blk.0.test_f32", [32], 0, 32, f32),
+        ("blk.0.test_q5_0", [32], 6, 32, block_q5),
+        ("blk.0.test_q8_0", [32], 8, 64, block_q8),
+        ("blk.0.test_f32", [32], 0, 128, f32),
     ]
     for name, dims, kind, offset, _ in tensors:
         out += struct.pack("<Q", len(name)) + name.encode()

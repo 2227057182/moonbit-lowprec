@@ -8,6 +8,39 @@
 /// Supported tensor types: 0 (`F32`) and 2 (`Q4_0`). Anything else is
 /// reported with a byte size of zero instead of being guessed at.
 
+/// The 24-byte fixed part of a GGUF file: magic, version, and the two counts.
+/// Enough to identify a file and size it before deciding to parse the rest,
+/// which matters when the payload is hundreds of megabytes.
+pub struct GgufHeader {
+  version : Int
+  tensor_count : Int
+  kv_count : Int
+}
+
+/// Reads only the fixed header. Unlike `parse_gguf` this accepts a buffer
+/// that holds just the first 24 bytes, so a caller can identify a file
+/// without holding it in memory.
+pub fn parse_gguf_header(bytes : Array[Byte]) -> Option[GgufHeader] {
+  if bytes.length() < 24 {
+    return None
+  }
+  if byte_at(bytes, 0) != 71 ||
+    byte_at(bytes, 1) != 71 ||
+    byte_at(bytes, 2) != 85 ||
+    byte_at(bytes, 3) != 70 {
+    return None
+  }
+  let version = read_u32(bytes, 4)
+  if version < 1 || version > 3 {
+    return None
+  }
+  Some({
+    version,
+    tensor_count: read_u64(bytes, 8).to_int(),
+    kv_count: read_u64(bytes, 16).to_int(),
+  })
+}
+
 /// One tensor entry from the header.
 pub struct GgufTensor {
   name : String

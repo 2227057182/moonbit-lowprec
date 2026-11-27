@@ -14,7 +14,7 @@ moon test --target js
 Expected: `moon check` finishes with no errors; on 0.1.20261023 no warnings,
 on 0.1.20261104 the only output is the deprecation notice for
 `Double::from_int` / `Int64::from_int`. Each test run prints
-`Total tests: 64, passed: 64, failed: 0`. The command-line inspector
+`Total tests: 73, passed: 73, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -45,6 +45,7 @@ way, and the generator refuses to guess:
 
 ```sh
 python3 tools/gen_fp_vectors.py > fp_vectors.mbt
+python3 tools/gen_fp8_vectors.py > fp8_vectors.mbt
 python3 tools/make_gguf_fixtures.py path/to/stories260K.gguf   # prints hex
 python3 tools/emit_gguf_test.py path/to/stories260K.gguf       # rewrites the test
 ```
@@ -110,6 +111,22 @@ prints `selftest 7/7 passed`.
 - `a truncated payload is rejected` — the same header with the last eight
   payload bytes removed: the header alone still parses, so only the extent
   check can catch it.
+- `every e4m3 pattern agrees with the rational table` — all 256 patterns,
+  value by value against `fp8_vectors.mbt`.
+- `every e5m2 pattern agrees with the rational table` — the same for the
+  other format, including its infinities.
+- `narrowing reproduces every finite pattern` — both formats, signed zero and
+  subnormals included.
+- `positive values increase with the pattern` — strict monotonicity on the
+  positive half of each format.
+- `e4m3 saturates or reports overflow, and has no infinity` and
+  `e5m2 keeps ieee infinities` — the 480 rounding boundary, an infinity input
+  that E4M3 cannot store, and the infinities E5M2 can.
+- `e4m3 subnormal rounding and the tie at 1.5 ulp` — the subnormal floor and
+  a tie that ties-to-even must break toward the even pattern.
+- `nan patterns are exactly the ones the formats define` — 2 and 6.
+- `published constants match their patterns` — 448, 57344, 2^-9, 2^-6, 2^-16,
+  2^-14.
 
 ## Where the reference values come from
 
@@ -127,6 +144,11 @@ numpy's `float16`, which agreed on all 684 results.
 Fixed-point and quantization results are compared against an independently
 written `Double` path, so a mistake would have to be made twice in exactly the
 same way to pass.
+
+The fp8 table is produced by `tools/gen_fp8_vectors.py` from `Fraction`
+arithmetic written straight from the two format definitions — no float
+anywhere — so every row is exact and the MoonBit side is compared against
+values it had no part in producing.
 
 The GGUF fixtures come from `tools/make_gguf_fixtures.py`, which is a separate
 implementation of the container format from the one under test. The block

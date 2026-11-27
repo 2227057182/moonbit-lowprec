@@ -8,6 +8,7 @@ fn usage() -> Unit {
   println("  requant <q> <in_scale> <in_zp> <out_scale> <out_zp>")
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
   println("  arith <f16|bf16> <a_bits> <b_bits>   the four operations on a pair")
+  println("  fp8 <e4m3|e5m2> <bits>  decode an 8-bit float pattern")
   println("  gguf <hex>              parse a GGUF container and report per tensor")
   println("  report                  compare four rounding modes on a sine signal")
   println("  verify                  check the published reference vectors")
@@ -307,6 +308,37 @@ fn selftest() -> Unit {
   println("selftest " + passed.to_string() + "/" + (passed + failed).to_string() + " passed")
 }
 
+fn show_fp8(kind : String, bits : Int) -> Unit {
+  let pattern = "bits=" + (bits & 0xFF).to_string()
+  if kind == "e5m2" {
+    let v = @lib.E5M2::from_bits(bits)
+    let cls = if v.is_nan() {
+      "nan"
+    } else if v.is_infinite() {
+      "infinite"
+    } else if v.is_zero() {
+      "zero"
+    } else if v.is_subnormal() {
+      "subnormal"
+    } else {
+      "normal"
+    }
+    println(pattern + " sign=" + v.sign_bit().to_string() + " exp=" + v.exponent_field().to_string() + " mant=" + v.mantissa_field().to_string() + " class=" + cls + " value=" + v.to_float().to_string())
+  } else {
+    let v = @lib.E4M3::from_bits(bits)
+    let cls = if v.is_nan() {
+      "nan"
+    } else if v.is_zero() {
+      "zero"
+    } else if v.is_subnormal() {
+      "subnormal"
+    } else {
+      "normal"
+    }
+    println(pattern + " sign=" + v.sign_bit().to_string() + " exp=" + v.exponent_field().to_string() + " mant=" + v.mantissa_field().to_string() + " class=" + cls + " value=" + v.to_float().to_string())
+  }
+}
+
 fn hex_digit(d : Int) -> String {
   let code = if d < 10 { 48 + d } else { 87 + d }
   code.unsafe_to_char().to_string()
@@ -407,6 +439,8 @@ fn main {
       parse_double(args[5]),
       parse_int(args[6]),
     )
+  } else if cmd == "fp8" && args.length() >= 4 {
+    show_fp8(args[2], parse_bits(args[3]))
   } else if cmd == "arith" && args.length() >= 5 {
     show_arith(args[2], parse_bits(args[3]), parse_bits(args[4]))
   } else if cmd == "q4_0" && args.length() >= 18 {

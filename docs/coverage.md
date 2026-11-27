@@ -70,6 +70,17 @@ stored but not operated on is a conversion table, not a numeric layer. That is
 the axis this release fills, which is also why the work is done on the
 significand instead of by widening to binary64.
 
+## 8-bit float formats
+
+The same scan returns no `float8`, `e4m3` or `e5m2` match. `matrixlt/moon-onnx`
+casts tensors through ONNX's `float8` types but does not expose an 8-bit float
+as a store-and-inspect type, and `soehi/gguf`'s block readers decode 4- and
+5-bit integers rather than 8-bit floats. What is missing is not the arithmetic
+(the formats are conversion and storage formats, not compute formats) but the
+exact decode, the classification predicates, and the rounding behaviour on the
+way back — including E4M3's unusual corner where the largest finite value and
+the NaN share an all-ones exponent.
+
 ## Fields where the ecosystem is already dense (do not rebuild)
 
 Recorded so the choice above is a deliberate comparison, not an accident:

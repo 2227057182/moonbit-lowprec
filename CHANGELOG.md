@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.11.0 — 2026-11-27
+
+The 8-bit float formats used for fp8 inference.
+
+- `E4M3` (`float8_e4m3fn`): one sign, four exponent bits with a bias of 7,
+  three significand bits, no infinity. `0x7E` is 448 and `0x7E`/`0x7F` sit
+  next to each other, so the NaN test is `(bits & 0x7F) == 0x7F` and not
+  "exponent all ones"; the rules are stated in the source so the corner is
+  not discovered by surprise.
+- `E5M2` (`float8_e5m2`): five exponent bits, two significand bits,
+  infinities at `0x7C`/`0xFC`, and six NaN patterns.
+- Both widen exactly to binary32, narrow with round-to-nearest ties-to-even
+  and gradual underflow, and carry the classification predicates. `E4M3`
+  saturates at 448 as ONNX `Cast` does, with `from_float_overflow_nan` for
+  callers that want overflow to become NaN; anything past the 480 midpoint
+  takes one of those two paths. `E5M2` overflows to infinity.
+- `fp8_vectors.mbt`: 256 rows per format, decoded with exact rational
+  arithmetic by `tools/gen_fp8_vectors.py`. The tests compare every pattern,
+  round-trip every finite one, check that the positive half increases
+  strictly with the pattern, and count the NaNs (2 and 6).
+- CLI: `fp8 <e4m3|e5m2> <bits>`.
+
 ## 0.10.0 — 2026-11-27
 
 Two more GGML block formats, so a container's common tensor types can all be

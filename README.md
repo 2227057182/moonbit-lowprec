@@ -29,6 +29,14 @@ runner, not a numeric type, and it has no float16, bfloat16, per-channel
 scale, requantization path or error reporting. Those are the parts this
 project supplies.
 
+The 8-bit formats are missing in the same way: neither `E4M3` nor `E5M2`
+appears in those descriptions, and no listed module stores an 8-bit float as
+a type a caller can hold. They matter because fp8 is what ONNX and the newer
+inference stacks compress weights and activations to, and because E4M3 has a
+corner that hand-written decoders get wrong: the largest finite value 448
+shares an all-ones exponent with the NaN pattern, so the usual
+"exponent all ones means special" rule is false for it.
+
 The gap is not cosmetic. binary16 has a 5-bit exponent (range 6.1e-5 to
 65504) and an 11-bit significand; bfloat16 keeps binary32's 8-bit exponent
 but only 8 significant bits; fixed-point has no exponent at all and no NaN,
@@ -112,6 +120,26 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
   `10 * log10(signal energy / error energy)`, reported as positive infinity
   when nothing is lost
 
+### `FP8` — 8-bit float formats
+
+- `E4M3` — the OCP / ONNX `float8_e4m3fn`: one sign bit, four exponent bits
+  with a bias of 7, three significand bits. It has no infinity: the largest
+  finite value is 448 at `0x7E`, the smallest positive value is 2^-9, and
+  only `0x7F` and `0xFF` are NaN. `0x7E` being finite is why the NaN test
+  cannot be "exponent all ones".
+- `E5M2` — the OCP / ONNX `float8_e5m2`: five exponent bits with a bias of
+  15, two significand bits, infinities at `0x7C` / `0xFC`, NaN at the other
+  six patterns, largest finite 57344.
+- `from_bits`, `bits`, `sign_bit`, `exponent_field`, `mantissa_field`, and
+  `is_nan` / `is_infinite` / `is_zero` / `is_subnormal` / `is_normal` /
+  `is_finite` / `is_negative`.
+- `to_float` never rounds: every 8-bit value is exactly representable in
+  binary32. `from_float` rounds to nearest, ties to even, with gradual
+  underflow. E4M3 saturates at 448 by default (the ONNX `Cast` behaviour);
+  `from_float_overflow_nan` turns anything past 480 into NaN instead. E5M2
+  overflows to infinity, and both formats flush below half the smallest
+  subnormal.
+
 ### `GGUF` — container reading
 
 `parse_gguf` reads a GGUF v3 header: metadata pairs are skipped except
@@ -184,12 +212,19 @@ Exhaustive checks, not samples:
     within half a step of the nearest representable value, and truncation
     must show a strictly larger maximum error than nearest-even on the same
     points.
+11. **FP8 table**: all 256 patterns of each format compared value by value
+    against a table decoded with exact rational arithmetic by an independent
+    implementation, then every finite pattern narrowed back to its own bits;
+    the positive half of each format must also be strictly increasing with
+    the pattern, and the NaN counts (2 for E4M3, 6 for E5M2) are asserted.
 
 Targeted tests cover hand-checked rounding directions, division, per-channel
 parameters, integer dot products, clamp edges, SNR agreement with an
 independent `Double` computation, all sixteen Q4_0 codes, IEEE special values
 (NaN, infinity, overflow, signed zero), the header of a released model, and
-truncated containers that must be refused.
+truncated containers that must be refused. For the 8-bit formats they pin the
+448 boundary at 480, the infinity that E4M3 cannot store, and the tie at
+1.5 × 2^-9 where ties-to-even picks the even pattern.
 
 Two independent routes produce the arithmetic answers: the integer core and
 the `Double`-mediated path. They agree everywhere in the sweeps above, and
@@ -259,10 +294,15 @@ f16 0x3c00 and 0x4200  (1, 3)
   difference 0xc000  -2
   product    0x4200  3
   quotient   0x3555  0.33325195
+
+$ moon run cmd/main --target wasm -- fp8 e4m3 0x7e
+bits=126 sign=0 exp=15 mant=6 class=normal value=448
 ```
 
-The last block is the shortest check of the arithmetic: 1 and 3 give 4, -2, 3
-and the correctly rounded 1/3, and every value can be confirmed by hand.
+The `arith` block is the shortest check of the 16-bit arithmetic: 1 and 3 give
+4, -2, 3 and the correctly rounded 1/3, and every value can be confirmed by
+hand. `fp8 e4m3 0x7e` shows the odd corner of E4M3: an exponent of all ones
+with a significand other than seven is a finite 448, not a NaN.
 
 `requant` prints the integer multiplier and shift it derived, so the
 quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
@@ -305,12 +345,17 @@ only widening. `verify_vectors()` returns `(checked, failed)`,
 `moon run cmd/main -- verify` prints `vectors 60/60 reproduce`, and a test
 fails if any row stops reproducing.
 
+`fp8_vectors.mbt` publishes the other direction: all 256 patterns of `E4M3`
+and all 256 of `E5M2`, each with its exact value and a marker for NaN or
+infinity. A caller porting either format to another language can compare
+against those rows without running this code.
+
 ## Roadmap
 
-- 0.10: `Q5_0` and `Q8_0` block readers, checked against an independent
-  implementation of the layouts
-- later: `e4m3`-style 8-bit float formats and `Q4_K`/`Q6_K` super-blocks, when
-  a caller actually needs them rather than because the format list has gaps
+- 0.11: `E4M3` and `E5M2`, each checked pattern by pattern against a rational
+  table and round-tripped
+- later: `Q4_K`/`Q6_K` super-blocks and fp8 dot products, when a caller
+  actually needs them rather than because the format list has gaps
 
 ## License
 

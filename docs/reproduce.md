@@ -14,7 +14,7 @@ moon test --target js
 Expected: `moon check` finishes with no errors; on 0.1.20261023 no warnings,
 on 0.1.20261104 the only output is the deprecation notice for
 `Double::from_int` / `Int64::from_int`. Each test run prints
-`Total tests: 83, passed: 83, failed: 0`. The command-line inspector
+`Total tests: 85, passed: 85, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -106,15 +106,21 @@ prints `selftest 7/7 passed`.
   metadata entries, the same values llama.cpp reports.
 - `a short buffer is enough to identify a file` — and the same bytes with a
   broken magic are refused.
-- `a fixture container parses and dequantizes` — a 1264-byte container with
-  one block each of Q4_0, Q5_0, Q8_0, Q4_K, Q6_K and Q5_K plus an F32 vector;
-  offsets, payload position and thirty-five sampled weights end to end.
+- `a fixture container parses and dequantizes` — a 1554-byte container with
+  one block each of Q4_0, Q5_0, Q8_0, Q4_K, Q6_K, Q5_K, Q2_K and Q3_K plus an
+  F32 vector; offsets, payload position and fifty-one sampled weights end to
+  end.
 - `k4 scale and min unpacking covers both bit paths` — the twelve packed
   bytes of a K-quant super-block against an eight-row table written by hand.
 - `k4 scale and min reach the six bit maximum` — 63 in the low six bits and
   the nibble-only path for the second four.
 - `K-quant payload sizes follow the 256-weight super-block` — 144, 210 and
   176 bytes per block, and their double-block multiples.
+- `the q2_k and q3_k payload sizes follow the super-block` — 84 and 110, the
+  two sizes that were left out until every K-quant type read here.
+- `the twelve q3_k scale bytes unpack to sixteen signed fields` — all sixteen
+  values against the fixture's packed table, which is where a byte-order error
+  shows up first.
 - `a non-gguf byte array is rejected` — 24 bytes of junk must not parse.
 - `a truncated payload is rejected` — the same header with the last eight
   payload bytes removed: the header alone still parses, so only the extent
@@ -181,12 +187,14 @@ llama.cpp's reader.
 
 A third opinion covers the K-quant blocks. Installing the `gguf` package
 (`python -m pip install gguf`) and dequantizing the same block bytes through
-`gguf.quants.dequantize` gives values that match the fixture literals exactly,
-with a maximum difference of 0.0 on all 256 values of each of the three
-blocks. That package is maintained by the organisation that publishes
-llama.cpp, so the layout is not being judged by this repository alone —
-`soehi/gguf` 0.1.3, an independent MoonBit module, reads the same `Q4_K` and
-`Q6_K` blocks too.
+`gguf.quants.dequantize` gives values that match the fixture literals
+exactly, with a maximum difference of 0.0 on all 256 values of each of the
+five blocks — `Q2_K` and `Q3_K` were compared value by value with a one-off
+probe before being reduced to the literals in the suite. That package is
+maintained by the organisation that publishes llama.cpp, so the layout is
+not being judged by this repository alone — `soehi/gguf` 0.1.3, an
+independent MoonBit module, reads the same `Q4_K` and `Q6_K` blocks too, though
+not `Q2_K`, `Q3_K` or `Q5_K`.
 
 ## Known platform constraints
 

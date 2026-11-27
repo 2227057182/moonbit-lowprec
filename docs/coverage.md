@@ -90,12 +90,18 @@ project does. Stated plainly: **Q4_K and Q6_K dequantization is not a gap**,
 because a MoonBit caller can already get those weights as `Float`.
 
 What that module does not provide, checked file by file: no `Q5_K` (id 13),
-no `Q2_K`/`Q3_K`, no binary16 or bfloat16 arithmetic, no fp8, no fixed-point
-format with a selectable rounding mode, and no error report. Its output is
-`Float` tied to the `Bytes` of a GGUF payload. The layer this project argues
-for — a value you can store, convert with a stated rounding, and feed into the
-same report as every other format — sits outside it. That is the axis, not the
-block map.
+no `Q2_K` (10) or `Q3_K` (11), no binary16 or bfloat16 arithmetic, no fp8, no
+fixed-point format with a selectable rounding mode, and no error report. Its
+output is `Float` tied to the `Bytes` of a GGUF payload. The layer this project
+argues for — a value you can store, convert with a stated rounding, and feed
+into the same report as every other format — sits outside it. That is the axis,
+not the block map.
+
+As of 0.14.0 the five K-quant types are complete here — 10, 11, 12, 13 and 14 —
+while the module above stops at 12 and 14. The two new ones are the smallest
+prize in this release and the honest framing is that completeness is the claim,
+not novelty: `Q2_K` and `Q3_K` were the only K-quant formats a caller could not
+read in MoonBit at all.
 
 ## Conversions between the low-precision formats
 

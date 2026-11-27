@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.14.0 — 2026-11-27
+
+`Q2_K` and `Q3_K`, the two super-blocks that complete the llama.cpp K-quant
+family.
+
+- `dequantize_tensor` handles kind 10 (`Q2_K`, 84 bytes) and kind 11
+  (`Q3_K`, 110 bytes). With `Q4_K`, `Q5_K` and `Q6_K` from 0.12.0, every
+  K-quant type llama.cpp defines now reads here.
+- `Q2_K`: sixteen scale bytes, each a four-bit scale in the low nibble and a
+  four-bit min in the high nibble, then 64 bytes of four 2-bit weights each,
+  then f16 `d` and f16 `dmin`. Sixteen weights share a byte, and the value is
+  `d * sc * q - dmin * m`.
+- `Q3_K`: 32 high-bit bytes, 64 bytes of 2-bit weights, twelve bytes holding
+  sixteen 6-bit scales and f16 `d`. The third bit inverts the offset: set keeps
+  the 0..3 code, clear subtracts four. That inversion is why llama.cpp flips
+  the mask bit rather than just shifting it.
+- `k3_scale` unpacks the scales: below eight, the low nibble of byte `i` holds
+  the low four bits; from eight, the high nibble of byte `i - 8`. The two high
+  bits sit in bytes eight to eleven, one two-bit field per byte and per group
+  of four scales.
+- The fixture grew to 1554 bytes and nine tensors, still built by
+  `tools/make_gguf_fixtures.py` and still read back by the two independent
+  implementations.
+- All 256 values of each new block match the official `gguf` package with zero
+  difference, checked by a one-off probe that asserted every value before the
+  sampling literals in the suite stayed.
+- Two tests are permanent: the payload sizes and the sixteen decoded scales,
+  so a byte-order regression fails on the scale table even if the sampled
+  weights stay in range.
+- `moon test`: 85 tests, 85 passing on wasm, wasm-gc and js.
+
 ## 0.13.0 — 2026-11-27
 
 Direct conversions between the formats, in integer arithmetic.

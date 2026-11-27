@@ -1,6 +1,6 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.13.0 ships **IEEE 754
+Low-precision numeric types for MoonBit. Version 0.14.0 ships **IEEE 754
 binary16**, **bfloat16**, **fixed-point**, **affine quantization**, the two
 **8-bit floats** and a **GGUF container reader** down to the K-quant
 super-blocks, and includes correctly rounded **addition, subtraction,
@@ -149,34 +149,40 @@ type and payload offset. `parse_gguf_header` reads only the fixed 24-byte
 prefix — magic, version, tensor count, metadata count — so a caller can
 identify and size a file without holding it: useful when the payload is
 hundreds of megabytes. `dequantize_tensor` turns a tensor into binary64 values:
-`F32` is widened directly, while `Q4_0`, `Q5_0`, `Q8_0`, `Q4_K`, `Q6_K` and
-`Q5_K` go block by block: 32 weights per block with one f16 scale and 16, 22
-or 34 bytes of codes, or 256 weights per K-quant super-block — 144 bytes for
-`Q4_K`, 176 for `Q5_K`, 210 for `Q6_K`.
+`F32` is widened directly, while `Q4_0`, `Q5_0`, `Q8_0`, `Q2_K`, `Q3_K`,
+`Q4_K`, `Q6_K` and `Q5_K` go block by block: 32 weights per block with one
+f16 scale and 16, 22 or 34 bytes of codes, or 256 weights per K-quant
+super-block — 84 bytes for `Q2_K`, 110 for `Q3_K`, 144 for `Q4_K`, 176 for
+`Q5_K`, 210 for `Q6_K`. That is every K-quant type llama.cpp defines.
 
-The K-quant layouts are the ones that speak for the format's difficulty: a
-super-block nests eight six-bit sub-scales and eight six-bit mins in twelve
-bytes, with the second four taking their high two bits from bytes that already
-carry the first four. `Q4_K` applies `d * sc * q - dmin * m` per 32 weights,
-`Q5_K` adds a fifth bit per weight taken from 32 shared bytes whose eight bits
-serve the four groups, and `Q6_K` stores 6-bit signed weights biased by 32 and
-multiplies them by int8 sub-scales. The unpacking follows llama.cpp's
-`get_scale_min_k4` (`ggml-quants.c:889`) and is checked against a table written
-out by hand, so a transposed byte shows up as a wrong scale rather than as a
-plausible number.
+The K-quant layouts are the ones that speak for the format's difficulty.
+`Q2_K` spends sixteen bytes on a four-bit scale and a four-bit min per
+sixteen weights, then stores two bits per weight. `Q3_K` widens that to three
+bits: the third lives in a shared mask, and a set bit means the weight keeps
+its offset while a clear one subtracts four. `Q4_K` applies
+`d * sc * q - dmin * m` per 32 weights, `Q5_K` adds a fifth bit per weight
+taken from 32 shared bytes whose eight bits serve the four groups, and `Q6_K`
+stores 6-bit signed weights biased by 32 and multiplies them by int8
+sub-scales. Two of the scale packings are the ones llama.cpp writes into
+twelve bytes — `get_scale_min_k4` (`ggml-quants.c:889`) for `Q4_K` and
+`Q5_K`, and a sixteen-field six-bit layout for `Q3_K` — and both are checked
+against tables written out by hand, so a transposed byte shows up as a wrong
+scale rather than as a plausible number.
 
-The layout itself is not unique to this project: `soehi/gguf` 0.1.3 decodes the
-same `Q4_K` and `Q6_K` blocks, to Float, inside its container reader. The
-difference argued here is the output and the surrounding layer, not the block
-map: binary64 values that feed the same report pipeline as the fixed-point and
-float formats, with `Q5_K` and the fp8 formats alongside.
+The layout itself is not unique to this project: `soehi/gguf` 0.1.3 decodes
+`Q4_K` and `Q6_K`, to Float, inside its container reader. It has no `Q2_K`,
+`Q3_K` or `Q5_K`, and the difference argued here is the output and the
+surrounding layer as much as the block map: binary64 values that feed the
+same report pipeline as the fixed-point and float formats.
 
 The block readers are checked against two implementations written independently
 of this one: `tools/emit_gguf_test.py`, built from the layouts alone, and the
 maintained `gguf` Python package from the organisation that publishes
 llama.cpp, which dequantizes the same blocks with a maximum difference of zero
-on all 256 values of each K-quant block. The fixture is a 1264-byte container
-holding all seven types.
+on all 256 values of each of the five K-quant blocks. A one-off probe compared
+all 256 values of `Q2_K` and `Q3_K` against the package before they were
+reduced to the literals the tests keep. The fixture is a 1554-byte container
+holding all nine types.
 
 The payload never leaves the caller's byte array. That is deliberate: the
 targets this project builds for have no file access, so a caller that does
@@ -402,6 +408,7 @@ against those rows without running this code.
   `gguf` package
 - 0.13: direct conversions between the formats, exact where the target holds
   more significand bits, and checked by exhaustion
+- 0.14: `Q2_K` and `Q3_K`, so every K-quant type llama.cpp defines reads here
 - later: fp8 dot products, `Q2_K`, when a caller actually needs them rather
   than because the format list has gaps
 

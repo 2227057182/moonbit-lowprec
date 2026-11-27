@@ -10,6 +10,7 @@ fn usage() -> Unit {
   println("  arith <f16|bf16> <a_bits> <b_bits>   the four operations on a pair")
   println("  fp8 <e4m3|e5m2> <bits>  decode an 8-bit float pattern")
   println("  convert <from> <to> <bits>  convert between f16, bf16, e4m3 and e5m2")
+  println("  emit-gguf                write a two-tensor container and print its hex")
   println("  gguf <hex>              parse a GGUF container and report per tensor")
   println("  report                  compare four rounding modes on a sine signal")
   println("  verify                  check the published reference vectors")
@@ -459,6 +460,28 @@ fn show_convert(from : String, to : String, bits : Int) -> Unit {
   println(from + " " + hex4(bits) + " -> " + to + " " + hex4(out_bits) + "  value=" + value)
 }
 
+fn bytes_hex(b : Array[Byte]) -> String {
+  let mut out = ""
+  for i = 0; i < b.length(); i = i + 1 {
+    let v = b[i].to_int()
+    out = out + hex_digit((v >> 4) & 15) + hex_digit(v & 15)
+  }
+  out
+}
+
+fn show_emit_gguf() -> Unit {
+  let values = Array::make(32, 0.0)
+  for i = 0; i < 32; i = i + 1 {
+    values[i] = Double::from_int(i - 16) / 16.0
+  }
+  let tensors : Array[@lib.GgufTensorOut] = [
+    { name: "block_q8_0", dims: [32], kind: 8, payload: @lib.quantize_q8_0(values) },
+    { name: "block_q4_0", dims: [32], kind: 2, payload: @lib.quantize_q4_0(values) },
+  ]
+  let bytes = @lib.build_gguf(tensors, 32)
+  println("bytes=" + bytes.length().to_string() + " hex=" + bytes_hex(bytes))
+}
+
 fn main {
   let args = @env.args()
   if args.length() < 2 {
@@ -495,6 +518,8 @@ fn main {
     show_q4_0(scale, bytes)
   } else if cmd == "convert" && args.length() >= 5 {
     show_convert(args[2], args[3], parse_bits(args[4]))
+  } else if cmd == "emit-gguf" {
+    show_emit_gguf()
   } else if cmd == "gguf" && args.length() >= 3 {
     show_gguf(args[2])
   } else if cmd == "report" {

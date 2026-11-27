@@ -9,6 +9,7 @@ fn usage() -> Unit {
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
   println("  arith <f16|bf16> <a_bits> <b_bits>   the four operations on a pair")
   println("  fp8 <e4m3|e5m2> <bits>  decode an 8-bit float pattern")
+  println("  convert <from> <to> <bits>  convert between f16, bf16, e4m3 and e5m2")
   println("  gguf <hex>              parse a GGUF container and report per tensor")
   println("  report                  compare four rounding modes on a sine signal")
   println("  verify                  check the published reference vectors")
@@ -416,6 +417,48 @@ fn show_arith(kind : String, a : Int, b : Int) -> Unit {
   println("  quotient   " + hex4(quotient) + "  " + vq.to_string())
 }
 
+fn show_convert(from : String, to : String, bits : Int) -> Unit {
+  let (out_bits, value) = match (from, to) {
+    ("bf16", "f16") => {
+      let r = @lib.F16::from_bf16(@lib.BF16::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("f16", "bf16") => {
+      let r = @lib.BF16::from_f16(@lib.F16::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("e4m3", "f16") => {
+      let r = @lib.F16::from_e4m3(@lib.E4M3::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("e5m2", "f16") => {
+      let r = @lib.F16::from_e5m2(@lib.E5M2::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("e4m3", "e5m2") => {
+      let r = @lib.E5M2::from_e4m3(@lib.E4M3::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("e5m2", "e4m3") => {
+      let r = @lib.E4M3::from_e5m2(@lib.E5M2::from_bits(bits))
+      (r.bits(), r.to_float().to_string())
+    }
+    ("f16", "e4m3") => {
+      let r = @lib.E4M3::from_float(@lib.F16::from_bits(bits).to_float())
+      (r.bits(), r.to_float().to_string())
+    }
+    ("f16", "e5m2") => {
+      let r = @lib.E5M2::from_float(@lib.F16::from_bits(bits).to_float())
+      (r.bits(), r.to_float().to_string())
+    }
+    _ => {
+      println("unsupported conversion " + from + " -> " + to)
+      return
+    }
+  }
+  println(from + " " + hex4(bits) + " -> " + to + " " + hex4(out_bits) + "  value=" + value)
+}
+
 fn main {
   let args = @env.args()
   if args.length() < 2 {
@@ -450,6 +493,8 @@ fn main {
       bytes[i] = parse_bits(args[3 + i])
     }
     show_q4_0(scale, bytes)
+  } else if cmd == "convert" && args.length() >= 5 {
+    show_convert(args[2], args[3], parse_bits(args[4]))
   } else if cmd == "gguf" && args.length() >= 3 {
     show_gguf(args[2])
   } else if cmd == "report" {

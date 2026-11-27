@@ -103,8 +103,9 @@ prints `selftest 7/7 passed`.
   metadata entries, the same values llama.cpp reports.
 - `a short buffer is enough to identify a file` — and the same bytes with a
   broken magic are refused.
-- `a fixture container parses and dequantizes` — a 384-byte container with a
-  Q4_0 block and an F32 vector, offsets and payload end to end.
+- `a fixture container parses and dequantizes` — a 576-byte container with
+  one block each of Q4_0, Q5_0 and Q8_0 plus an F32 vector; offsets, payload
+  position and fourteen sampled weights end to end.
 - `a non-gguf byte array is rejected` — 24 bytes of junk must not parse.
 - `a truncated payload is rejected` — the same header with the last eight
   payload bytes removed: the header alone still parses, so only the extent
@@ -128,8 +129,12 @@ written `Double` path, so a mistake would have to be made twice in exactly the
 same way to pass.
 
 The GGUF fixtures come from `tools/make_gguf_fixtures.py`, which is a separate
-implementation of the container format from the one under test, and the real
-file's header values were cross-checked with llama.cpp's reader.
+implementation of the container format from the one under test. The block
+layouts are checked a second way: `tools/emit_gguf_test.py` reads the fixture
+and dequantizes it with an implementation written from the layouts alone,
+then writes the expected values into the test as literals, so the two sides
+share no code. The real file's header values were cross-checked with
+llama.cpp's reader.
 
 ## Known platform constraints
 

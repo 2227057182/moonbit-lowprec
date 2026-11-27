@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.0 — 2026-11-27
+
+Two more GGML block formats, so a container's common tensor types can all be
+read.
+
+- `dequantize_tensor` now handles `Q5_0` (kind 6) and `Q8_0` (kind 8) next to
+  `F32` and `Q4_0`. Q5_0 blocks are 22 bytes: one f16 scale, four bytes of
+  fifth bits, sixteen packed nibbles, weight j taking bit j and weight j+16
+  taking bit j+16. Q8_0 blocks are 34 bytes: one f16 scale and thirty-two
+  signed bytes. `byte_size` follows the same three layouts.
+- The fixture container grew from 384 to 576 bytes and now holds one block of
+  each of Q4_0, Q5_0 and Q8_0 plus the F32 vector. The block readers are
+  checked against a second implementation of the layouts written for
+  `tools/emit_gguf_test.py`, which reads the fixture and emits the expected
+  values as literals: every weight is a multiple of the 0.5 scale, so the
+  comparison is exact and the assertion carries no tolerance.
+- Docs and roadmap follow; the submission text still fits its byte limit.
+
 ## 0.9.0 — 2026-11-27
 
 Arithmetic on the 16-bit float types, and the reader checked against a

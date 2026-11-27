@@ -119,8 +119,12 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
 type and payload offset. `parse_gguf_header` reads only the fixed 24-byte
 prefix — magic, version, tensor count, metadata count — so a caller can
 identify and size a file without holding it: useful when the payload is
-hundreds of megabytes. `dequantize_tensor` turns an `F32` or `Q4_0` tensor
-into binary64 values, block by block for Q4_0.
+hundreds of megabytes. `dequantize_tensor` turns a tensor into binary64 values:
+`F32` is widened directly, while `Q4_0`, `Q5_0` and `Q8_0` go block by block,
+32 weights per block carrying one f16 scale and 16, 22 or 34 bytes of codes.
+The block readers are checked against a second implementation written from
+the layouts alone (`tools/emit_gguf_test.py`), over a 576-byte container
+holding all four types.
 
 The payload never leaves the caller's byte array. That is deliberate: the
 targets this project builds for have no file access, so a caller that does
@@ -303,10 +307,10 @@ fails if any row stops reproducing.
 
 ## Roadmap
 
-- 0.10: compare against `matrixlt/moon-onnx`'s per-tensor int8 operators,
-  the one point where the two implementations overlap
-- later: `Q5_0` / `Q8_0` blocks and `e4m3`-style 8-bit formats, when a caller
-  actually needs them rather than because the format list has gaps
+- 0.10: `Q5_0` and `Q8_0` block readers, checked against an independent
+  implementation of the layouts
+- later: `e4m3`-style 8-bit float formats and `Q4_K`/`Q6_K` super-blocks, when
+  a caller actually needs them rather than because the format list has gaps
 
 ## License
 

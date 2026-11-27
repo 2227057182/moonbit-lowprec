@@ -51,9 +51,9 @@ word.
   What is still absent, checked by code search over that repository:
   `bfloat16`, `float16`, `per_channel`, `requant` all return 0 matches. So
   there is no 16-bit float type, no per-channel scale, no integer-only
-  requantization path, no fixed-point type, no GGML Q4_0 block, and no
-  error reporting. The operator lives inside a graph runner and is not an
-  importable type layer.
+  requantization path, no fixed-point type, no GGML block format (Q4_0, Q5_0,
+  Q8_0), and no error reporting. The operator lives inside a graph runner and
+  is not an importable type layer.
 
   This project's contribution should therefore be argued on those axes, not
   on "no int8 support in the ecosystem".

@@ -58,6 +58,18 @@ word.
   This project's contribution should therefore be argued on those axes, not
   on "no int8 support in the ecosystem".
 
+## 16-bit arithmetic
+
+`moonbit-community/softfloat` does implement software floating-point
+arithmetic with explicit rounding, but over its own emulated types rather than
+as binary16 or bfloat16 values a caller can store and combine. `matrixlt/moon-onnx`
+has no `float16` or `bfloat16` anywhere, so it has no arithmetic on them
+either. Nothing in the index exposes "a binary16 value you can add, subtract,
+multiply and divide with a correctly rounded result" — and a type that can be
+stored but not operated on is a conversion table, not a numeric layer. That is
+the axis this release fills, which is also why the work is done on the
+significand instead of by widening to binary64.
+
 ## Fields where the ecosystem is already dense (do not rebuild)
 
 Recorded so the choice above is a deliberate comparison, not an accident:

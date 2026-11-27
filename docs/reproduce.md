@@ -1,7 +1,8 @@
 # Reproduce the results
 
-Requires `moon` (tested with 0.1.20261023) and a checkout of this
-repository.
+Requires `moon` (tested with 0.1.20261023 and 0.1.20261104) and a checkout of
+this repository. Python 3 with `numpy` is needed only to regenerate the
+reference tables, not to run the tests.
 
 ```sh
 moon check
@@ -10,8 +11,10 @@ moon test --target wasm-gc
 moon test --target js
 ```
 
-Expected: `moon check` finishes with no warnings; each test run prints
-`Total tests: 43, passed: 43, failed: 0`. The command-line inspector
+Expected: `moon check` finishes with no errors; on 0.1.20261023 no warnings,
+on 0.1.20261104 the only output is the deprecation notice for
+`Double::from_int` / `Int64::from_int`. Each test run prints
+`Total tests: 64, passed: 64, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -37,6 +40,22 @@ moon run cmd/main --target wasm -- gguf <that hex>
 same hex string is the one embedded in `gguf_wbtest.mbt`, so the fixture
 used by the tests can be regenerated and compared byte for byte.
 
+The arithmetic reference table and the GGUF fixtures are regenerated the same
+way, and the generator refuses to guess:
+
+```sh
+python3 tools/gen_fp_vectors.py > fp_vectors.mbt
+python3 tools/make_gguf_fixtures.py path/to/stories260K.gguf   # prints hex
+python3 tools/emit_gguf_test.py path/to/stories260K.gguf       # rewrites the test
+```
+
+`gen_fp_vectors.py` prints the table on stdout and writes the numpy cross-check
+to stderr: `numpy float16: 684 agreement, 0 disagreement`. The model used for
+the real-file check is `stories260K.gguf`, 1,185,376 bytes, sha256
+`270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d`, available
+from `ggml-org/models` on Hugging Face. It is not vendored here; only its
+first 24 bytes are, because that is what the identification path reads.
+
 `f16 0x0002` prints `value=1.1920929e-7` (2 × 2^-24), `requant` prints
 `multiplier=1342177280 shift=28 code=253 value=1.25`, `report` prints
 49.64783777764896 dB for nearest-even against 43.7 to 44.3 dB for the three
@@ -48,6 +67,16 @@ prints `selftest 7/7 passed`.
 - `exhaustive roundtrip over all 65536 patterns` — all binary16 patterns
   except NaN widen to binary32 and narrow back unchanged (63490 checked).
 - `exhaustive roundtrip over all 65536 bfloat16 patterns` — 65282 checked.
+- `f16 add over all patterns against the probes` — 65536 patterns × 12
+  probes, 786432 results against the double path.
+- `f16 multiply over all patterns against the probes` — another 786432.
+- `f16 divide and subtract over all patterns against the probes` — 1572864.
+- `bf16 add and multiply over all patterns against the probes` — 1572864.
+- `bf16 divide and subtract over all patterns against the probes` — 1572864.
+- `binary16 arithmetic reproduces the exact reference table` — 171 pairs ×
+  four operations, values from rational arithmetic, 684 bit-exact results;
+  the same for bfloat16. `the reference table covers the boundaries` asserts
+  the table really reaches subnormals and infinities.
 - `exhaustive 8-bit multiplication across five rounding modes` — 65536
   operand pairs × 5 modes compared with an independent `Double` reference.
 - `exhaustive widening multiply is exact` — the same pairs, raw product
@@ -69,6 +98,13 @@ prints `selftest 7/7 passed`.
   offsets and computed byte sizes.
 - `dequantize a q4_0 tensor and an f32 tensor` — 64 weights block by block,
   both nibble orders, plus the eight F32 values.
+- `the fixed header of a released model is read correctly` — the first 24
+  bytes of `stories260K.gguf` resolve to version 3, 48 tensors and 19
+  metadata entries, the same values llama.cpp reports.
+- `a short buffer is enough to identify a file` — and the same bytes with a
+  broken magic are refused.
+- `a fixture container parses and dequantizes` — a 384-byte container with a
+  Q4_0 block and an F32 vector, offsets and payload end to end.
 - `a non-gguf byte array is rejected` — 24 bytes of junk must not parse.
 - `a truncated payload is rejected` — the same header with the last eight
   payload bytes removed: the header alone still parses, so only the extent
@@ -76,12 +112,24 @@ prints `selftest 7/7 passed`.
 
 ## Where the reference values come from
 
-No value is copied from an external tool. The float conversions are checked
-by their own round-trip and monotonicity properties over the full pattern
-space, which is stronger than comparing a handful of values against a
-published table. Fixed-point and quantization results are compared against
-an independently written `Double` path, so a mistake would have to be made
-twice in exactly the same way to pass.
+The float conversions are checked by their own round-trip and monotonicity
+properties over the full pattern space, which is stronger than comparing a
+handful of values against a published table.
+
+The arithmetic reference table is built from `fractions.Fraction`: each
+operand is decoded to an exact rational, the operation is carried out exactly,
+and the result is rounded once by the rules of IEEE 754-2019 — no floating
+point anywhere on the reference side, so a double-rounding habit cannot be
+inherited. As a third opinion the same binary16 pairs are also evaluated with
+numpy's `float16`, which agreed on all 684 results.
+
+Fixed-point and quantization results are compared against an independently
+written `Double` path, so a mistake would have to be made twice in exactly the
+same way to pass.
+
+The GGUF fixtures come from `tools/make_gguf_fixtures.py`, which is a separate
+implementation of the container format from the one under test, and the real
+file's header values were cross-checked with llama.cpp's reader.
 
 ## Known platform constraints
 

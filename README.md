@@ -1,10 +1,12 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.8.0 ships **IEEE 754
+Low-precision numeric types for MoonBit. Version 0.9.0 ships **IEEE 754
 binary16**, **bfloat16**, **fixed-point**, **affine quantization** and a
-**GGUF container reader**, with signal-to-noise reporting, published
-reference vectors and a command-line inspector, everything checked against
-independent references.
+**GGUF container reader**, and now includes correctly rounded **addition,
+subtraction, multiplication and division** on both 16-bit float types —
+computed on the significand with no floating-point instruction — plus
+signal-to-noise reporting, published reference vectors and a command-line
+inspector, everything checked against independent references.
 
 ## Why this exists
 
@@ -31,9 +33,37 @@ The gap is not cosmetic. binary16 has a 5-bit exponent (range 6.1e-5 to
 65504) and an 11-bit significand; bfloat16 keeps binary32's 8-bit exponent
 but only 8 significant bits; fixed-point has no exponent at all and no NaN,
 only a fixed scale and a hard edge at each end. None of these is
-interchangeable with binary32.
+interchangeable with binary32 — and a type that can be stored but not added
+is not yet a numeric layer, which is why the arithmetic is the largest part
+of this release.
 
 ## What is implemented
+
+### 16-bit arithmetic
+
+`F16::add`, `F16::sub`, `F16::mul`, `F16::div` and the same four on `BF16`.
+
+The two formats differ only in field widths, so one integer core serves both.
+Each operand is decoded into a sign, an integer significand and a binary
+exponent — `value = m * 2^e` — the significands are combined exactly in 64 bits, and the result is rounded **once** when it is encoded back into
+the format. Consequences worth stating:
+
+- the rounding sees every discarded bit, so there is no intermediate rounding
+  to be fooled by, and the answer is the correctly rounded one
+- ties go to even, the subnormal range is entered gradually, overflow goes
+  to infinity rather than wrapping, and the sign of a zero result is
+  preserved for `(-0) + (-0)`
+- NaN and infinity propagate as IEEE 754 requires, including `infinity - infinity` and `infinity * 0` producing NaN
+- no binary64 instruction is used anywhere, so the same bits come out on
+  every backend and the code would still work on a target without a float
+  unit
+
+bfloat16 spans exponents that 64 bits cannot align: its smallest subnormal is
+2^-133 while its largest value is near 2^128. When the exponent gap exceeds
+fifty bits the smaller operand is below half an ulp of the larger, so the sum
+rounds back to the larger operand; binary16 never reaches that gap (its whole
+range fits in about forty bits), so the branch exists for one format only and
+is covered by the sweep.
 
 ### `F16` — IEEE 754 binary16
 
@@ -41,6 +71,7 @@ interchangeable with binary32.
 - `to_float`, `from_float` — round-to-nearest ties-to-even, overflow to
   infinity, gradual underflow to subnormal then zero
 - `to_double`, `from_double`
+- `add`, `sub`, `mul`, `div`
 - constants: `min_subnormal`, `min_normal`, `max_value`, `infinity`, `nan`,
   `epsilon`, `precision`
 
@@ -85,8 +116,11 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
 
 `parse_gguf` reads a GGUF v3 header: metadata pairs are skipped except
 `general.alignment`, and the tensor table keeps each name, dimensions, ggml
-type and payload offset. `dequantize_tensor` turns an `F32` or `Q4_0`
-tensor into binary64 values, block by block for Q4_0.
+type and payload offset. `parse_gguf_header` reads only the fixed 24-byte
+prefix — magic, version, tensor count, metadata count — so a caller can
+identify and size a file without holding it: useful when the payload is
+hundreds of megabytes. `dequantize_tensor` turns an `F32` or `Q4_0` tensor
+into binary64 values, block by block for Q4_0.
 
 The payload never leaves the caller's byte array. That is deliberate: the
 targets this project builds for have no file access, so a caller that does
@@ -105,39 +139,60 @@ gguf v3  alignment 32  tensors 2
 
 Those figures are the point: a tensor that arrived as Q4_0 still holds
 62.6 dB after another int8 quantization, because the coarser format already
-discarded the fine detail. The test container is synthetic — two tensors,
-324 bytes — but the layout is the published format and the reader is
-checked against it byte for byte, including both nibble orders of a Q4_0
-block.
+discarded the fine detail.
+
+The same reader has now been run on a released model, not only on a
+hand-built sample. `stories260K.gguf` (1,185,376 bytes, sha256
+`270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d`) has
+version 3, alignment 32, 19 metadata entries, 48 tensors and a payload that
+starts at offset 14176 — the values this reader produces, the values
+llama.cpp's own reader produces, and the values an independent Python
+reader written for the test produces. Its first 24 bytes are in the test
+suite, so the identification path is checked against a file this repository
+did not create.
 
 ## Correctness evidence
 
-`moon test` runs forty-two tests on `wasm`, `wasm-gc` and `js`, all
-passing.
+`moon test` runs sixty-four tests on `wasm`, `wasm-gc` and `js`, all passing.
 
 Exhaustive checks, not samples:
 
 1. **binary16 round-trip** over all 65536 patterns — 63490 non-NaN checked.
 2. **bfloat16 round-trip** over all 65536 patterns — 65282 non-NaN checked.
-3. **binary16 and bfloat16 monotonicity** over the positive finite range.
-4. **Classification** for both float types on all 65536 patterns.
-5. **Fixed-point multiplication**: all 65536 operand pairs from the signed
+3. **binary16 arithmetic sweep**: all 65536 patterns against twelve probes,
+   add, multiply, divide and subtract — 3,145,728 results compared against a
+   higher-precision path.
+4. **bfloat16 arithmetic sweep**: the same 65536 patterns against the same
+   probes and the same four operations — another 3,145,728 results.
+5. **Reference table**: 171 operand pairs × four operations × two formats,
+   generated from exact rational arithmetic and one rounding. The binary16
+   half of it also agrees with numpy's float16 on all 684 results.
+6. **Fixed-point multiplication**: all 65536 operand pairs from the signed
    8-bit range × five rounding modes = 327680 results against an
    independent `Double` reference.
-6. **Widening multiply**: the same 65536 pairs must produce the raw product
+7. **Widening multiply**: the same 65536 pairs must produce the raw product
    exactly.
-7. **Saturation and wrap** over every one of the 65536 raw values in a
+8. **Saturation and wrap** over every one of the 65536 raw values in a
    16-bit field.
-8. **Requantization**: all 256 int8 codes against a `Double` computation,
+9. **Requantization**: all 256 int8 codes against a `Double` computation,
    with the exact-match count asserted.
-9. **Rounding bound**: 990 signal points across -0.99..0.99 must stay
-   within half a step of the nearest representable value, and truncation
-   must show a strictly larger maximum error than nearest-even on the same
-   points.
+10. **Rounding bound**: 990 signal points across -0.99..0.99 must stay
+    within half a step of the nearest representable value, and truncation
+    must show a strictly larger maximum error than nearest-even on the same
+    points.
 
-Targeted tests cover hand-checked rounding directions, division,
-per-channel parameters, integer dot products, clamp edges, SNR agreement
-with an independent `Double` computation, and all sixteen Q4_0 codes.
+Targeted tests cover hand-checked rounding directions, division, per-channel
+parameters, integer dot products, clamp edges, SNR agreement with an
+independent `Double` computation, all sixteen Q4_0 codes, IEEE special values
+(NaN, infinity, overflow, signed zero), the header of a released model, and
+truncated containers that must be refused.
+
+Two independent routes produce the arithmetic answers: the integer core and
+the `Double`-mediated path. They agree everywhere in the sweeps above, and
+during development the disagreement they exposed was a real defect —
+`(-0) + (-0)` losing its sign. The bfloat16 wide-gap branch was likewise found
+by the sweep, not by inspection: an aligned shift of 126 bits silently
+produced zero.
 
 ## Platform notes
 
@@ -150,11 +205,24 @@ and they are stated rather than hidden:
 - the requantization product reaches about 2^38, so `requantize` forms it
   in `Int64` before rounding
 
+The arithmetic core works in 64 bits and needs no wider type; the bfloat16
+exponent gap is handled by the half-ulp rule described above rather than by
+extended precision.
+
+`moon check` reports no errors and no warnings on compiler 0.1.20261023. On
+0.1.20261104 the same sources build cleanly but the newer compiler marks
+`Double::from_int` and `Int64::from_int` as deprecated, which is a naming
+notice rather than a correctness issue.
+
 ## Usage
 
 ```moonbit
 let a = F16::from_float(1.5)
 assert_eq(a.to_float(), 1.5)
+assert_eq(a.add(a).bits(), 0x4100)        // 3.0
+
+let b = BF16::from_float(1.0)
+assert_eq(b.div(b).bits(), 0x3F80)        // 1.0
 
 let x = Fixed::from_raw(3, 1, 16) // 1.5
 assert_eq(x.mul(x, 0, NearestEven, Saturate).raw(), 2)
@@ -180,7 +248,17 @@ raw=3 frac=1 width=16 valid=true value=1.5
 
 $ moon run cmd/main --target wasm -- requant 25 0.05 0 0.01 128
 multiplier=1342177280 shift=28 code=253 value=1.25
+
+$ moon run cmd/main --target wasm -- arith f16 0x3C00 0x4200
+f16 0x3c00 and 0x4200  (1, 3)
+  sum        0x4400  4
+  difference 0xc000  -2
+  product    0x4200  3
+  quotient   0x3555  0.33325195
 ```
+
+The last block is the shortest check of the arithmetic: 1 and 3 give 4, -2, 3
+and the correctly rounded 1/3, and every value can be confirmed by hand.
 
 `requant` prints the integer multiplier and shift it derived, so the
 quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
@@ -217,20 +295,18 @@ quant_vectors: Array[(Int, Double)] // 11 int8 codes at scale 0.0078125
 fixed_vectors: Array[(Int, Double)] // 11 raw values at frac 3
 ```
 
-Each row is the pattern and the exact binary64 value it must widen to. The
-table pins both ends of every type — the smallest binary16 subnormal, the
-largest binary16 finite value, the largest bfloat16 finite value, both int8
-codes, and the edges of a 16-bit fixed field. `verify_vectors()` returns
-`(checked, failed)`, `moon run cmd/main -- verify` prints
-`vectors 60/60 reproduce`, and a test fails if any row stops reproducing.
+`fp_vectors.mbt` goes further: 171 operand pairs per format with the expected
+result of each of the four operations, so the table checks arithmetic and not
+only widening. `verify_vectors()` returns `(checked, failed)`,
+`moon run cmd/main -- verify` prints `vectors 60/60 reproduce`, and a test
+fails if any row stops reproducing.
 
 ## Roadmap
 
-- 0.9: numeric comparison against `matrixlt/moon-onnx`'s per-tensor int8
-  operators, so the two implementations can be cross-checked on the one
-  overlap they share
-- later: `Q5_0` / `Q8_0` blocks, when a caller actually needs them rather
-  than because the format list has gaps
+- 0.10: compare against `matrixlt/moon-onnx`'s per-tensor int8 operators,
+  the one point where the two implementations overlap
+- later: `Q5_0` / `Q8_0` blocks and `e4m3`-style 8-bit formats, when a caller
+  actually needs them rather than because the format list has gaps
 
 ## License
 

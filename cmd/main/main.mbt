@@ -7,6 +7,7 @@ fn usage() -> Unit {
   println("  quant <value> <scale> <zp>   quantize then dequantize with int8")
   println("  requant <q> <in_scale> <in_zp> <out_scale> <out_zp>")
   println("  q4_0 <scale_bits> <byte>...  dequantize a GGML Q4_0 block")
+  println("  arith <f16|bf16> <a_bits> <b_bits>   the four operations on a pair")
   println("  gguf <hex>              parse a GGUF container and report per tensor")
   println("  report                  compare four rounding modes on a sine signal")
   println("  verify                  check the published reference vectors")
@@ -306,6 +307,83 @@ fn selftest() -> Unit {
   println("selftest " + passed.to_string() + "/" + (passed + failed).to_string() + " passed")
 }
 
+fn hex_digit(d : Int) -> String {
+  let code = if d < 10 { 48 + d } else { 87 + d }
+  code.unsafe_to_char().to_string()
+}
+
+fn hex4(bits : Int) -> String {
+  let mut out = "0x"
+  let mut i = 3
+  while i >= 0 {
+    out = out + hex_digit((bits >> (i * 4)) & 15)
+    i = i - 1
+  }
+  out
+}
+
+/// Shows the four operations on one operand pair. The point is that the
+/// printed bits can be checked against a known result by hand: `arith f16
+/// 0x3C00 0x4200` is 1 and 3.
+fn show_arith(kind : String, a : Int, b : Int) -> Unit {
+  let is_bf = kind == "bf16"
+  let fa = if is_bf {
+    @lib.BF16::from_bits(a).to_float()
+  } else {
+    @lib.F16::from_bits(a).to_float()
+  }
+  let fb = if is_bf {
+    @lib.BF16::from_bits(b).to_float()
+  } else {
+    @lib.F16::from_bits(b).to_float()
+  }
+  let sum = if is_bf {
+    @lib.BF16::from_bits(a).add(@lib.BF16::from_bits(b)).bits()
+  } else {
+    @lib.F16::from_bits(a).add(@lib.F16::from_bits(b)).bits()
+  }
+  let difference = if is_bf {
+    @lib.BF16::from_bits(a).sub(@lib.BF16::from_bits(b)).bits()
+  } else {
+    @lib.F16::from_bits(a).sub(@lib.F16::from_bits(b)).bits()
+  }
+  let product = if is_bf {
+    @lib.BF16::from_bits(a).mul(@lib.BF16::from_bits(b)).bits()
+  } else {
+    @lib.F16::from_bits(a).mul(@lib.F16::from_bits(b)).bits()
+  }
+  let quotient = if is_bf {
+    @lib.BF16::from_bits(a).div(@lib.BF16::from_bits(b)).bits()
+  } else {
+    @lib.F16::from_bits(a).div(@lib.F16::from_bits(b)).bits()
+  }
+  let vs = if is_bf {
+    @lib.BF16::from_bits(sum).to_float()
+  } else {
+    @lib.F16::from_bits(sum).to_float()
+  }
+  let vd = if is_bf {
+    @lib.BF16::from_bits(difference).to_float()
+  } else {
+    @lib.F16::from_bits(difference).to_float()
+  }
+  let vm = if is_bf {
+    @lib.BF16::from_bits(product).to_float()
+  } else {
+    @lib.F16::from_bits(product).to_float()
+  }
+  let vq = if is_bf {
+    @lib.BF16::from_bits(quotient).to_float()
+  } else {
+    @lib.F16::from_bits(quotient).to_float()
+  }
+  println(kind + " " + hex4(a) + " and " + hex4(b) + "  (" + fa.to_string() + ", " + fb.to_string() + ")")
+  println("  sum        " + hex4(sum) + "  " + vs.to_string())
+  println("  difference " + hex4(difference) + "  " + vd.to_string())
+  println("  product    " + hex4(product) + "  " + vm.to_string())
+  println("  quotient   " + hex4(quotient) + "  " + vq.to_string())
+}
+
 fn main {
   let args = @env.args()
   if args.length() < 2 {
@@ -329,6 +407,8 @@ fn main {
       parse_double(args[5]),
       parse_int(args[6]),
     )
+  } else if cmd == "arith" && args.length() >= 5 {
+    show_arith(args[2], parse_bits(args[3]), parse_bits(args[4]))
   } else if cmd == "q4_0" && args.length() >= 18 {
     let scale = parse_bits(args[2])
     let bytes = Array::make(16, 0)

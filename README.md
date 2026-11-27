@@ -1,9 +1,11 @@
 # moonbit-lowprec
 
-Low-precision numeric types for MoonBit. Version 0.14.0 ships **IEEE 754
+Low-precision numeric types for MoonBit. Version 0.15.0 ships **IEEE 754
 binary16**, **bfloat16**, **fixed-point**, **affine quantization**, the two
-**8-bit floats** and a **GGUF container reader** down to the K-quant
-super-blocks, and includes correctly rounded **addition, subtraction,
+**8-bit floats**, a **GGUF container reader** down to the K-quant
+super-blocks and a **writer** whose output llama.cpp's own Python tooling
+reads back, with the **Q8_0 and Q4_0 quantizers** that fill it. It includes
+correctly rounded **addition, subtraction,
 multiplication and division** on both 16-bit float types — computed on the
 significand with no floating-point instruction — **direct conversions** between
 the formats, signal-to-noise reporting, published reference vectors and a
@@ -141,7 +143,7 @@ A value is `raw * 2^-frac` in a `width`-bit field, stored in an `Int`.
   overflows to infinity, and both formats flush below half the smallest
   subnormal.
 
-### `GGUF` — container reading
+### `GGUF` — container reading and writing
 
 `parse_gguf` reads a GGUF v3 header: metadata pairs are skipped except
 `general.alignment`, and the tensor table keeps each name, dimensions, ggml
@@ -213,6 +215,36 @@ reader written for the test produces. Its first 24 bytes are in the test
 suite, so the identification path is checked against a file this repository
 did not create.
 
+`build_gguf` runs the other way. It takes an array of `GgufTensorOut` —name,
+dimensions, ggml type, payload — and produces a GGUF v3 container: the 24-byte
+prefix, one entry per tensor, then each payload at an offset aligned to the
+container's own alignment. Metadata is not written, so `kv_count` is zero and
+`data_start` lands right after the table. The fixture's nine payloads survive
+a write-and-read cycle byte for byte, in a container this project formed
+rather than one it received.
+
+Two quantizers fill those payloads. `quantize_q8_0` takes 32 values, stores
+`amax / 127` as a binary16 scale and one signed byte per weight rounded half
+away from zero — the rule llama.cpp applies, not the ties-to-even rule used in
+the requantization path — and `quantize_q4_0` stores `amax / 8` with codes in
+-8..7 biased by eight, the low nibble carrying weights 0..15 and the high
+nibble 16..31.
+
+The output is checked where it is hardest to fake: by handing the bytes to
+`gguf`, the Python reader maintained by the organisation that publishes
+llama.cpp. `tools/check_written.py` does exactly that and prints
+
+```
+210 bytes, magic b'GGUF'
+  block_q8_0 type 8 shape [32] maxerr 0.00390625
+  block_q4_0 type 2 shape [32] maxerr 0.0625
+written container: read back by the official package, 0 errors
+```
+
+Both errors are exactly half a quantization step, which is the best a
+round-to-nearest quantizer can promise, and they come out of the other
+implementation's arithmetic on bytes this one wrote.
+
 ### Conversions between the formats
 
 The formats convert directly, with integer arithmetic on the patterns rather
@@ -234,7 +266,7 @@ each direction for the fp8 pair.
 
 ## Correctness evidence
 
-`moon test` runs sixty-four tests on `wasm`, `wasm-gc` and `js`, all passing.
+`moon test` runs eighty-eight tests on `wasm`, `wasm-gc` and `js`, all passing.
 
 Exhaustive checks, not samples:
 
@@ -266,6 +298,11 @@ Exhaustive checks, not samples:
     implementation, then every finite pattern narrowed back to its own bits;
     the positive half of each format must also be strictly increasing with
     the pattern, and the NaN counts (2 for E4M3, 6 for E5M2) are asserted.
+12. **Container write-back**: the nine payloads of the fixture are copied into
+    a fresh container built here and read back — names, types, sizes and bytes
+    unchanged. The two quantizers are measured against half a step on 32
+    values, and the bytes they produce are read by the official Python
+    package with maximum errors of exactly 0.00390625 and 0.0625.
 
 Targeted tests cover hand-checked rounding directions, division, per-channel
 parameters, integer dot products, clamp edges, SNR agreement with an
@@ -356,8 +393,9 @@ with a significand other than seven is a finite 448, not a NaN.
 `requant` prints the integer multiplier and shift it derived, so the
 quantization arithmetic is inspectable rather than opaque. `q4_0` takes a
 sixteen-bit scale and sixteen packed bytes, `gguf` takes a whole container
-as hex, `verify` re-checks the published vectors, `selftest` runs seven
-built-in checks.
+as hex, `emit-gguf` writes a two-tensor container and prints its hex so a
+reader elsewhere can open it, `verify` re-checks the published vectors,
+`selftest` runs seven built-in checks.
 
 `report` runs the same sine signal through the four rounding modes, which
 is the shortest way to see what rounding costs:
@@ -409,8 +447,10 @@ against those rows without running this code.
 - 0.13: direct conversions between the formats, exact where the target holds
   more significand bits, and checked by exhaustion
 - 0.14: `Q2_K` and `Q3_K`, so every K-quant type llama.cpp defines reads here
-- later: fp8 dot products, `Q2_K`, when a caller actually needs them rather
-  than because the format list has gaps
+- 0.15: `build_gguf`, `quantize_q8_0` and `quantize_q4_0`, so the bytes a
+  reader consumes can also be produced and handed back to llama.cpp's tooling
+- later: fp8 dot products, and a writer for the K-quant blocks when a caller
+  needs to emit them rather than because the format list has gaps
 
 ## License
 

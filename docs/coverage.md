@@ -103,6 +103,28 @@ prize in this release and the honest framing is that completeness is the claim,
 not novelty: `Q2_K` and `Q3_K` were the only K-quant formats a caller could not
 read in MoonBit at all.
 
+## Writing GGUF containers in the ecosystem
+
+The same file-by-file check turns up nothing on the writing side. `soehi/gguf`
+exposes dequantization functions — payload bytes in, values out — and no
+function that produces bytes: no header assembly, no tensor entry, no
+quantizer. `xfp8` and `msl-gguf` likewise stop at values. Serializing a
+container in MoonBit was, as far as this scan reaches, not done.
+
+That absence is worth one sentence of caution, because "nobody does it" is
+the kind of claim this project has been told not to lean on. The claim here
+is narrower and checkable: the bytes `build_gguf` writes are opened by `gguf`,
+the Python package maintained by the organisation that publishes llama.cpp,
+which reports both tensors, their types and shapes, and dequantizes them with
+maximum errors of exactly half a quantization step. A writer that another
+implementation accepts is not a self-argument.
+
+What is not written, stated rather than implied: metadata pairs (`kv_count`
+is zero), and the K-quant super-block layouts. Only `Q8_0` and `Q4_0` have
+quantizers, because those are the two blocks whose packing the reader already
+takes apart here and whose bytes the fixture round trip could be checked
+against.
+
 ## Conversions between the low-precision formats
 
 The 3975-module scan found no module that converts between binary16 and

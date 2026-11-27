@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.15.0 — 2026-11-27
+
+The writing path: containers can now be produced, not only read, and filled
+with two quantizers.
+
+- `GgufTensorOut` and `build_gguf(tensors, alignment)` emit a GGUF v3
+  container: the 24-byte prefix, one tensor entry each, and every payload at
+  an offset aligned to the container's alignment. No metadata is written,
+  so `kv_count` is zero and `data_start` follows the table.
+- The nine payloads of the 1554-byte fixture go through `build_gguf` and
+  `parse_gguf` unchanged — names, kinds, sizes and bytes — which is the
+  round trip a writer has to survive.
+- `quantize_q8_0` packs 32 values into 34 bytes: `amax / 127` as a binary16
+  scale, then one signed byte per weight rounded half away from zero and
+  clamped to -127..127, with negative codes stored as their two's complement.
+- `quantize_q4_0` packs the same span into 18 bytes: `amax / 8` as the scale,
+  codes in -8..7 biased by eight, low nibble for weights 0..15 and high
+  nibble for 16..31.
+- `hex4` prints a single pattern; `bytes_hex` prints a whole array, so
+  `moon run cmd/main -- emit-gguf` can put a container on one line.
+- `tools/check_written.py` hands that hex to the official `gguf` package:
+  210 bytes, two tensors, maximum errors of exactly 0.00390625 for Q8_0 and
+  0.0625 for Q4_0 — half a step each, computed by another implementation
+  on bytes written here.
+- 88 tests pass on `wasm`, `wasm-gc` and `js`; three are new.
+- Not written, and stated as such: metadata pairs, and the K-quant
+  super-block layouts, which the reader takes apart but the writer does not
+  yet assemble.
+
 ## 0.14.0 — 2026-11-27
 
 `Q2_K` and `Q3_K`, the two super-blocks that complete the llama.cpp K-quant

@@ -14,7 +14,7 @@ moon test --target js
 Expected: `moon check` finishes with no errors; on 0.1.20261023 no warnings,
 on 0.1.20261104 the only output is the deprecation notice for
 `Double::from_int` / `Int64::from_int`. Each test run prints
-`Total tests: 85, passed: 85, failed: 0`. The command-line inspector
+`Total tests: 88, passed: 88, failed: 0`. The command-line inspector
 reproduces the numbers quoted in the proposal:
 
 ```sh
@@ -28,7 +28,16 @@ moon run cmd/main --target wasm -- verify
 moon run cmd/main --target wasm -- selftest
 moon run cmd/main --target wasm -- convert bf16 f16 0x3F80
 moon run cmd/main --target wasm -- convert e5m2 e4m3 0x7C
+moon run cmd/main --target wasm -- emit-gguf > written.txt
+python tools/check_written.py written.txt
 ```
+
+The last two commands close the writing path from the other side: `emit-gguf`
+quantizes 32 values into a Q8_0 block and a Q4_0 block, builds a 210-byte
+container around them and prints its hex; `check_written.py` hands those bytes
+to the official `gguf` Python package, which must list both tensors and
+dequantize them with errors of exactly 0.00390625 and 0.0625 — half a step
+each — and exit zero.
 
 The container command needs the file bytes on the command line, because
 the targets this project builds for have no file access:
@@ -121,6 +130,13 @@ prints `selftest 7/7 passed`.
 - `the twelve q3_k scale bytes unpack to sixteen signed fields` — all sixteen
   values against the fixture's packed table, which is where a byte-order error
   shows up first.
+- `a container written here reads back with the same payloads` — all nine
+  blocks of the fixture copied into a container built by `build_gguf`, then
+  read back: names, kinds, sizes and every payload byte unchanged.
+- `q8_0 quantization keeps every weight within half a step` — 32 values,
+  34 bytes, 0.004 on the dequantized result.
+- `q4_0 quantization keeps every weight within half a step` — the same span,
+  18 bytes, scale 0x3000 in the first two bytes and 0.0625 on the result.
 - `a non-gguf byte array is rejected` — 24 bytes of junk must not parse.
 - `a truncated payload is rejected` — the same header with the last eight
   payload bytes removed: the header alone still parses, so only the extent

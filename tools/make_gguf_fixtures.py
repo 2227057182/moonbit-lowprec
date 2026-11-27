@@ -144,6 +144,51 @@ def q6_k_block():
     return ql + qh + scales + struct.pack("<e", 0.25)
 
 
+def q2_k_block():
+    """One 84-byte Q2_K super-block of 256 weights.
+
+    Sixteen scale bytes (low nibble times d, high nibble times dmin), then
+    64 bytes of four 2-bit weights each, then f16 d and f16 dmin. The low
+    nibbles walk 1..15 and the high nibbles walk 2..15, so no two sub-blocks
+    share a scale or a min.
+    """
+    scales = bytes(((j + 1) % 16) | ((j + 2) % 16) << 4 for j in range(16))
+    qs = bytes(((l + 3 * s) % 4) for s in range(2) for l in range(32))
+    return scales + qs + struct.pack("<e", 0.5) + struct.pack("<e", 0.25)
+
+
+def pack_k3_scales(values):
+    """Pack sixteen 6-bit scales into Q3_K's twelve bytes.
+
+    Scale i below eight takes the low nibble of byte i, from eight on the
+    high nibble of byte i - 8. Its two high bits are one field of byte
+    eight plus i % 4, at bit 2 * (i // 4).
+    """
+    out = bytearray(12)
+    for i, v in enumerate(values):
+        low, high = v & 0x0F, (v >> 4) & 0x03
+        if i < 8:
+            out[i] |= low
+        else:
+            out[i - 8] |= low << 4
+        out[8 + (i % 4)] |= high << (2 * (i // 4))
+    return bytes(out)
+
+
+def q3_k_block():
+    """One 110-byte Q3_K super-block of 256 weights.
+
+    Thirty-two high-bit bytes, 64 bytes of 2-bit weights, twelve packed
+    scale bytes and f16 d. The mask alternates so both branches of the
+    three-bit weight are covered, and the sixteen scales span 3..45 so the
+    six-bit fields differ after the minus thirty-two.
+    """
+    hmask = bytes((l * 7 + 1) & 0xFF for l in range(32))
+    qs = bytes(((l + 2 * s) % 4) for s in range(2) for l in range(32))
+    scales = pack_k3_scales([3, 9, 15, 21, 27, 33, 39, 45, 51, 57, 5, 11, 17, 23, 29, 35])
+    return hmask + qs + scales + struct.pack("<e", 1.0)
+
+
 def write_container(path):
     qs = bytearray(16)
     for j in range(16):
@@ -158,15 +203,6 @@ def write_container(path):
     block_q8 = struct.pack("<H", 0x3800) + q8_qs
     f32 = b"".join(struct.pack("<f", i * 0.25) for i in range(32))
 
-    out = bytearray()
-    out += MAGIC
-    out += struct.pack("<I", 3)
-    out += struct.pack("<Q", 7)
-    out += struct.pack("<Q", 2)
-    for key, value in (("general.architecture", "llama"), ("general.name", "lowprec-fixture")):
-        out += struct.pack("<Q", len(key)) + key.encode()
-        out += struct.pack("<I", T_STRING)
-        out += struct.pack("<Q", len(value)) + value.encode()
     tensors = [
         ("blk.0.test_q4_0", [32], 2, 0, block),
         ("blk.0.test_q5_0", [32], 6, 32, block_q5),
@@ -175,7 +211,19 @@ def write_container(path):
         ("blk.0.test_q4_k", [256], 12, 256, q4_k_block()),
         ("blk.0.test_q6_k", [256], 14, 416, q6_k_block()),
         ("blk.0.test_q5_k", [256], 13, 640, q5_k_block()),
+        ("blk.0.test_q2_k", [256], 10, 816, q2_k_block()),
+        ("blk.0.test_q3_k", [256], 11, 900, q3_k_block()),
     ]
+
+    out = bytearray()
+    out += MAGIC
+    out += struct.pack("<I", 3)
+    out += struct.pack("<Q", len(tensors))
+    out += struct.pack("<Q", 2)
+    for key, value in (("general.architecture", "llama"), ("general.name", "lowprec-fixture")):
+        out += struct.pack("<Q", len(key)) + key.encode()
+        out += struct.pack("<I", T_STRING)
+        out += struct.pack("<Q", len(value)) + value.encode()
     for name, dims, kind, offset, _ in tensors:
         out += struct.pack("<Q", len(name)) + name.encode()
         out += struct.pack("<I", len(dims))

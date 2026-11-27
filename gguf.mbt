@@ -250,6 +250,10 @@ pub fn GgufTensor::byte_size(self : GgufTensor) -> Int {
     (n / 32) * 22
   } else if self.kind == 8 {
     (n / 32) * 34
+  } else if self.kind == 10 {
+    (n / 256) * 84
+  } else if self.kind == 11 {
+    (n / 256) * 110
   } else if self.kind == 12 {
     (n / 256) * 144
   } else if self.kind == 13 {
@@ -264,9 +268,10 @@ pub fn GgufTensor::byte_size(self : GgufTensor) -> Int {
 /// Dequantizes a tensor into binary64 values. F32 is widened directly; the
 /// block formats go block by block, 32 weights at a time: Q4_0 in 18 bytes,
 /// Q5_0 in 22 (two bytes of scale, four of high bits, sixteen packed nibbles),
-/// Q8_0 in 34 (two bytes of scale, thirty-two signed bytes), Q4_K in 144 and
-/// Q6_K in 210 for 256 weights (the K-quant super-block used by the Q4_K_M
-/// and Q6_K files llama.cpp ships).
+/// Q8_0 in 34 (two bytes of scale, thirty-two signed bytes), Q4_K in 144,
+/// Q2_K in 84, Q3_K in 110 and Q6_K in 210 for 256 weights (the K-quant
+/// super-block used by the Q2_K, Q3_K_M, Q3_K_L, Q4_K_M and Q6_K files
+/// llama.cpp ships).
 pub fn dequantize_tensor(
   bytes : Array[Byte],
   file : GgufFile,
@@ -317,6 +322,63 @@ pub fn dequantize_tensor(
         let raw = byte_at(bytes, o + 2 + j)
         let signed = if raw >= 128 { raw - 256 } else { raw }
         out[b * 32 + j] = Double::from_int(signed) * scale
+      }
+    }
+  } else if t.kind == 10 {
+    // Q2_K: 256 weights in 84 bytes. Sixteen one-byte scales split into a low
+    // nibble that multiplies `d` and a high nibble that multiplies `dmin`,
+    // then 64 bytes of four 2-bit weights each, then f16 `d` and f16 `dmin`.
+    // A 32-byte run covers 128 weights: four bit pairs, each giving sixteen
+    // values from the low half and sixteen from the high half.
+    let blocks = n / 256
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 84
+      let d = F16::from_bits(read_u16(bytes, o + 80)).to_double()
+      let dmin = F16::from_bits(read_u16(bytes, o + 82)).to_double()
+      for seg = 0; seg < 2; seg = seg + 1 {
+        let q = o + 16 + seg * 32
+        for j = 0; j < 4; j = j + 1 {
+          let shift = j * 2
+          let s1 = byte_at(bytes, o + seg * 8 + j * 2)
+          let s2 = byte_at(bytes, o + seg * 8 + j * 2 + 1)
+          let dl1 = d * Double::from_int(s1 & 15)
+          let ml1 = dmin * Double::from_int(s1 >> 4)
+          let dl2 = d * Double::from_int(s2 & 15)
+          let ml2 = dmin * Double::from_int(s2 >> 4)
+          let base_out = b * 256 + seg * 128 + j * 32
+          for l = 0; l < 16; l = l + 1 {
+            out[base_out + l] = dl1 * Double::from_int((byte_at(bytes, q + l) >> shift) & 3) - ml1
+            out[base_out + 16 + l] = dl2 * Double::from_int((byte_at(bytes, q + 16 + l) >> shift) & 3) - ml2
+          }
+        }
+      }
+    }
+  } else if t.kind == 11 {
+    // Q3_K: 256 weights in 110 bytes: 32 high-bit bytes, 64 bytes of 2-bit
+    // weights, twelve bytes carrying sixteen 6-bit scales, f16 `d`. A weight
+    // is three bits, and the high bit inverts the offset: it is subtracted
+    // four when the mask bit is clear, which is where llama.cpp flips the
+    // bit and shifts the mask instead of moving the pointer.
+    let blocks = n / 256
+    for b = 0; b < blocks; b = b + 1 {
+      let o = base + b * 110
+      let d = F16::from_bits(read_u16(bytes, o + 108)).to_double()
+      for seg = 0; seg < 2; seg = seg + 1 {
+        let qs = o + 32 + seg * 32
+        let hm = o
+        for j = 0; j < 4; j = j + 1 {
+          let shift = j * 2
+          let bit = seg * 4 + j
+          let dl1 = d * Double::from_int(k3_scale(bytes, o + 96, seg * 8 + j * 2))
+          let dl2 = d * Double::from_int(k3_scale(bytes, o + 96, seg * 8 + j * 2 + 1))
+          let base_out = b * 256 + seg * 128 + j * 32
+          for l = 0; l < 16; l = l + 1 {
+            let off1 = if ((byte_at(bytes, hm + l) >> bit) & 1) == 1 { 0 } else { 4 }
+            let off2 = if ((byte_at(bytes, hm + 16 + l) >> bit) & 1) == 1 { 0 } else { 4 }
+            out[base_out + l] = dl1 * Double::from_int(((byte_at(bytes, qs + l) >> shift) & 3) - off1)
+            out[base_out + 16 + l] = dl2 * Double::from_int(((byte_at(bytes, qs + 16 + l) >> shift) & 3) - off2)
+          }
+        }
       }
     }
   } else if t.kind == 12 {
@@ -410,6 +472,20 @@ pub fn dequantize_tensor(
     }
   }
   out
+}
+
+/// Q3_K's sixteen 6-bit scales. Below eight, the low four bits are the low
+/// nibble of byte `i`; from eight on they are the high nibble of byte `i - 8`.
+/// The two high bits sit in the second four bytes, one field of two bits per
+/// byte and per group of four scales.
+fn k3_scale(b : Array[Byte], sbase : Int, i : Int) -> Int {
+  let low = if i < 8 {
+    byte_at(b, sbase + i) & 15
+  } else {
+    byte_at(b, sbase + i - 8) >> 4
+  }
+  let high = (byte_at(b, sbase + 8 + (i % 4)) >> (2 * (i / 4))) & 3
+  (low | (high << 4)) - 32
 }
 
 /// llama.cpp's get_scale_min_k4: the first four sub-scales and mins sit in the

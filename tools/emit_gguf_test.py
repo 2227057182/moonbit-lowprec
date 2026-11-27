@@ -155,6 +155,46 @@ def q6_k(p):
     return out
 
 
+def k3_scale(p, base, i):
+    """Q3_K's sixteen 6-bit scales, written from the gguf package's layout."""
+    low = (p[base + i] & 15) if i < 8 else (p[base + i - 8] >> 4)
+    high = (p[base + 8 + (i % 4)] >> (2 * (i // 4))) & 3
+    return (low | (high << 4)) - 32
+
+
+def q2_k(p):
+    d = half(p, 80)
+    dmin = half(p, 82)
+    out = [0.0] * 256
+    for s in range(2):
+        q = 16 + s * 32
+        for j in range(4):
+            sc1, sc2 = p[s * 8 + j * 2], p[s * 8 + j * 2 + 1]
+            for l in range(16):
+                out[s * 128 + j * 32 + l] = (
+                    d * (sc1 & 15) * ((p[q + l] >> (2 * j)) & 3) - dmin * (sc1 >> 4))
+                out[s * 128 + j * 32 + 16 + l] = (
+                    d * (sc2 & 15) * ((p[q + 16 + l] >> (2 * j)) & 3) - dmin * (sc2 >> 4))
+    return out
+
+
+def q3_k(p):
+    d = half(p, 108)
+    out = [0.0] * 256
+    for s in range(2):
+        qs = 32 + s * 32
+        for j in range(4):
+            bit = s * 4 + j
+            dl1 = d * k3_scale(p, 96, s * 8 + j * 2)
+            dl2 = d * k3_scale(p, 96, s * 8 + j * 2 + 1)
+            for l in range(16):
+                o1 = 0 if (p[l] >> bit) & 1 else 4
+                o2 = 0 if (p[16 + l] >> bit) & 1 else 4
+                out[s * 128 + j * 32 + l] = dl1 * (((p[qs + l] >> (2 * j)) & 3) - o1)
+                out[s * 128 + j * 32 + 16 + l] = dl2 * (((p[qs + 16 + l] >> (2 * j)) & 3) - o2)
+    return out
+
+
 def fmt(v):
     s = repr(float(v))
     if "e" in s or "E" in s:
@@ -167,7 +207,8 @@ TEMPLATE = '''/// Fixtures built by `tools/make_gguf_fixtures.py`, an independen
 /// `tools/emit_gguf_test.py`, a second implementation of the block layouts.
 ///
 /// `fixture_gguf_hex` is a complete {size}-byte container holding one block
-/// each of Q4_0, Q5_0, Q8_0, Q4_K, Q6_K and Q5_K plus a 32-value F32 tensor.
+/// each of Q4_0, Q5_0, Q8_0, Q4_K, Q6_K, Q5_K, Q2_K and Q3_K plus a 32-value
+/// F32 tensor.
 ///
 /// `real_header_hex` is the first 24 bytes of stories260K.gguf, a released
 /// model whose sha256 is
@@ -198,7 +239,7 @@ test "a fixture container parses and dequantizes" {{
   let bytes = bytes_from_hex(fixture_gguf_hex)
   let file = parse_gguf(bytes).unwrap()
   assert_eq(file.version, 3)
-  assert_eq(file.tensors.length(), 7)
+  assert_eq(file.tensors.length(), 9)
   assert_eq(file.data_start, {data_start})
   assert_eq(file.tensors[0].name, "blk.0.test_q4_0")
   assert_eq(file.tensors[0].kind, 2)
@@ -214,8 +255,13 @@ test "a fixture container parses and dequantizes" {{
   assert_eq(file.tensors[5].kind, 14)
   assert_eq(file.tensors[6].name, "blk.0.test_q5_k")
   assert_eq(file.tensors[6].kind, 13)
+  assert_eq(file.tensors[7].name, "blk.0.test_q2_k")
+  assert_eq(file.tensors[7].kind, 10)
+  assert_eq(file.tensors[8].name, "blk.0.test_q3_k")
+  assert_eq(file.tensors[8].kind, 11)
   assert_eq(file.tensors[0].dims[0], 32)
   assert_eq(file.tensors[4].dims[0], 256)
+  assert_eq(file.tensors[7].dims[0], 256)
 
   // All blocks carry the same 0.5 scale, so the weights are exact
   // multiples of 0.5 and the expected values below are literals.
@@ -233,6 +279,12 @@ test "a fixture container parses and dequantizes" {{
 {q6k}
   let q5k = dequantize_tensor(bytes, file, file.tensors[6])
 {q5k}
+  // Q2_K subtracts `dmin` after scaling, Q3_K's third bit inverts the offset
+  // of four. The values below match the official gguf package on all 256.
+  let q2k = dequantize_tensor(bytes, file, file.tensors[7])
+{q2k}
+  let q3k = dequantize_tensor(bytes, file, file.tensors[8])
+{q3k}
 }}
 '''
 
@@ -257,6 +309,8 @@ def main():
         "q4k": (q4_k(block(tensors[4], 144)), [0, 31, 32, 64, 96, 128, 255]),
         "q6k": (q6_k(block(tensors[5], 210)), [0, 31, 32, 64, 96, 128, 255]),
         "q5k": (q5_k(block(tensors[6], 176)), [0, 31, 32, 64, 96, 128, 255]),
+        "q2k": (q2_k(block(tensors[7], 84)), [0, 31, 32, 64, 128, 255]),
+        "q3k": (q3_k(block(tensors[8], 110)), [1, 15, 31, 64, 95, 96, 128, 191]),
     }
     lines = {}
     for name, (values, picks) in expected.items():
